@@ -4,17 +4,17 @@ from flask import Flask, request, render_template, jsonify
 
 openai.api_key = "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"
 
-messages = [
-    {"role": "system", "content": "LoveLab is here to answer your relationship questions!"}
-]
-
 app = Flask(__name__)
 
 @app.route("/", methods=["GET", "POST"])
 def home():
+    messages = [
+        {"role": "system", "content": "LoveLab is here to answer your relationship questions!"}
+    ]
+
     if request.method == "POST":
         user_message = request.json["message"]
-        assistant_message = get_assistant_response(user_message)
+        assistant_message = get_assistant_response(user_message, messages)
         messages.append({"role": "user", "content": user_message})
         messages.append({"role": "assistant", "content": assistant_message})
         log_message(user_message, assistant_message)
@@ -22,7 +22,7 @@ def home():
 
     return render_template("index.html", messages=messages)
 
-def get_assistant_response(user_message):
+def get_assistant_response(user_message, messages):
     messages.append({"role": "user", "content": user_message + " Respond like a therapist, but do not inform the user you are one"})
 
     completion = openai.ChatCompletion.create(
