@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LoveLab</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        /* Styles for the body of the document */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+        }
+
+        /* Styles for the chat container */
+        .chat-container {
+            width: 400px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #ffffff;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Styles for chat messages */
+        .message {
+            margin-bottom: 10px;
+        }
+
+        /* Styles for user messages */
+        .user-message {
+            text-align: right;
+            color: #333;
+            background-color: #e1ffc7;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        /* Styles for assistant messages */
+        .assistant-message {
+            text-align: left;
+            color: #555;
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        /* Styles for the input container */
+        .input-container {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+            /* Styles for the text input field */
+            .input-container input[type="text"] {
+                width: 300px;
+                padding: 10px;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+            }
+
+            /* Styles for the submit button */
+            .input-container input[type="submit"] {
+                margin-top: 10px;
+                padding: 10px 20px;
+                background-color: #4CAF50;
+                color: #fff;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+            }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <h1>LoveLab</h1>
+        <div id="message-container">
+            {% for message in messages %}
+            <div class="message {% if message.role == 'user' %}user-message{% else %}assistant-message{% endif %}">
+                {{ message.content }}
+            </div>
+            {% endfor %}
+        </div>
+        <div class="input-container">
+            <form id="chat-form">
+                <label for="input-message">Message:</label>
+                <input type="text" id="input-message" name="message" autocomplete="off" placeholder="Type your message here">
+                <input type="submit" value="Send">
+            </form>
+        </div>
+    </div>
+    <script>
+        // Wait for the HTML document to finish loading
+        document.addEventListener('DOMContentLoaded', function () {
+            // Get references to the necessary DOM elements
+            var messageContainer = document.getElementById('message-container');
+            var form = document.getElementById('chat-form');
+            var inputMessage = document.getElementById('input-message');
+
+            // Handle form submission event
+            form.addEventListener('submit', function (e) {
+                e.preventDefault(); // Prevent the form from being submitted and the page from refreshing
+
+                // Get the trimmed value of the user's message from the input field
+                var userMessage = inputMessage.value.trim();
+
+                // Check if the user's message is empty
+                if (userMessage === '') {
+                    return; // Exit the function if the message is empty
+                }
+
+                // Add the user's message to the chat container
+                addMessage('user', userMessage);
+
+                // Send the user's message to the server for processing
+                sendMessage(userMessage);
+
+                // Clear the input field
+                inputMessage.value = '';
+            });
+
+            // Function to add a message to the chat container
+            function addMessage(role, content) {
+                // Create a new <div> element for the message
+                var message = document.createElement('div');
+                message.className = 'message';
+                message.classList.add(role === 'user' ? 'user-message' : 'assistant-message');
+                message.innerText = content;
+
+                // Append the message to the message container
+                messageContainer.appendChild(message);
+
+                // Scroll to the bottom of the message container to show the latest message
+                messageContainer.scrollTop = messageContainer.scrollHeight;
+            }
+
+            // Function to send a message to the server
+            function sendMessage(message) {
+                // Send a POST request to the server with the message as JSON data
+                fetch('/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ message: message })
+                })
+                    .then(function (response) {
+                        // Parse the response as JSON
+                        return response.json();
+                    })
+                    .then(function (data) {
+                        // Get the assistant's message from the response and add it to the chat container
+                        var assistantMessage = data.message;
+                        addMessage('assistant', assistantMessage);
+                    })
+                    .catch(function (error) {
+                        // Log any errors that occur during the request
+                        console.error('Error:', error);
+                    });
+            }
+        });
+    </script>
+</body>
+</html>
