@@ -5,7 +5,6 @@ from flask import Flask, request, render_template, jsonify
 app = Flask(__name__)
 openai.api_key = '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'
 
-#messages = [{"role": "system", "content": "LoveLab is an AI-Powered application and is here to answer your relationship questions! The more detailed you are with me, the more accurate my responses will be! Here's an example... 'My boss is always complaining to me about how much they hate theyre job even though they make double what I make, they even choose to do this during my lunch break! What should I do?'"}]
 
 @app.route("/", methods=["GET", "POST"])
 def home():

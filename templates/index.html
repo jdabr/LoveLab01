@@ -1,12 +1,13 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>LoveLab</title>
+    <link href="https://fonts.googleapis.com/css?family=Roboto&display=swap" rel="stylesheet">
+    <link rel="stylesheet" type="text/css" href="styles.css" /> <!-- Figure out how to get CSS file separate -->
+    <title><span class="title-gradient">LoveLab</span></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        /* Styles for the body of the document */
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Roboto', Arial, sans-serif;
             background-color: #f5f5f5;
         }
 
@@ -15,9 +16,9 @@
             width: 400px;
             margin: 0 auto;
             padding: 20px;
-            background-color: #ffffff;
-            border: 1px solid #ccc;
-            border-radius: 5px;
+            background-color: #f9f9f9;
+            border: 1px solid #e6e6e6;
+            border-radius: 10px;
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         }
 
@@ -29,19 +30,20 @@
         /* Styles for user messages */
         .user-message {
             text-align: right;
-            color: #333;
-            background-color: #e1ffc7;
+            color: #fff;
+            background-color: #3897f0;
             padding: 10px;
-            border-radius: 5px;
+            border-radius: 10px;
         }
 
         /* Styles for assistant messages */
         .assistant-message {
             text-align: left;
-            color: #555;
-            background-color: #f5f5f5;
+            color: #333;
+            background-color: #fff;
             padding: 10px;
-            border-radius: 5px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         }
 
         /* Styles for the input container */
@@ -54,25 +56,39 @@
             .input-container input[type="text"] {
                 width: 300px;
                 padding: 10px;
-                border: 1px solid #ccc;
-                border-radius: 5px;
+                border: 1px solid #e6e6e6;
+                border-radius: 20px;
             }
 
             /* Styles for the submit button */
             .input-container input[type="submit"] {
                 margin-top: 10px;
                 padding: 10px 20px;
-                background-color: #4CAF50;
+                background-color: #3897f0;
                 color: #fff;
                 border: none;
-                border-radius: 5px;
+                border-radius: 20px;
                 cursor: pointer;
+                transition: background-color 0.3s ease;
             }
+
+                /* Hover state for the submit button */
+                .input-container input[type="submit"]:hover {
+                    background-color: #3477b8;
+                }
+
+        /* Title gradient styles */
+        .title-gradient {
+            background: linear-gradient(to right, #405de6, #833ab4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
     </style>
 </head>
 <body>
     <div class="chat-container">
-        <h1>LoveLab</h1>
+        <h1><span class="title-gradient">LoveLab</span></h1>
         <div id="message-container">
             {% for message in messages %}
             <div class="message {% if message.role == 'user' %}user-message{% else %}assistant-message{% endif %}">
@@ -86,110 +102,142 @@
                 <input type="text" id="input-message" name="message" autocomplete="off" placeholder="Type your message here">
                 <input type="submit" value="Send">
             </form>
+            <div class="terms-container">
+                <input type="checkbox" id="terms" name="terms">
+                <label for="terms">I agree to the terms and conditions</label>
+                <button id="terms-button">Terms and Conditions</button>
+                <div id="terms-text" style="display: none;">
+                    <!-- Insert your terms and conditions text here -->
+                    Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed nec interdum est. In id elit efficitur, aliquam tortor eu, tristique risus. Sed auctor mi sit amet mauris semper ultricies. Duis commodo lectus vel gravida eleifend.
+                </div>
+            </div>
         </div>
     </div>
     <script>
         // Wait for the HTML document to finish loading
-document.addEventListener('DOMContentLoaded', function () {
-  // Get references to the necessary DOM elements
-  var messageContainer = document.getElementById('message-container');
-  var form = document.getElementById('chat-form');
-  var inputMessage = document.getElementById('input-message');
-  var messageLog = []; // Array to store the message log
+        document.addEventListener('DOMContentLoaded', function () {
+            // Get references to the necessary DOM elements
+            var messageContainer = document.getElementById('message-container');
+            var form = document.getElementById('chat-form');
+            var inputMessage = document.getElementById('input-message');
+            var messageLog = []; // Array to store the message log
 
-  // Handle form submission event
-  form.addEventListener('submit', function (e) {
-    e.preventDefault(); // Prevent the form from being submitted and the page from refreshing
+           
 
-    // Get the trimmed value of the user's message from the input field
-    var userMessage = inputMessage.value.trim();
+            // Handle form submission event
+            form.addEventListener('submit', function (e) {
+                e.preventDefault(); // Prevent the form from being submitted and the page from refreshing
 
-    // Check if the user's message is empty
-    if (userMessage === '') {
-      return; // Exit the function if the message is empty
-    }
+                // Check if the terms checkbox is selected
+                var termsCheckbox = document.getElementById('terms');
+                if (!termsCheckbox.checked) {
+                    alert('Please agree to the terms and conditions to continue using the app.');
+                    return;
+                }
 
-    // Add the user's message to the chat container and log
-    addMessage('user', userMessage);
-    messageLog.push({ role: 'user', content: userMessage });
+                // Get the trimmed value of the user's message from the input field
+                var userMessage = inputMessage.value.trim();
 
-    // Display the "Thinking..." message
-    addThinkingMessage();
+                // Check if the user's message is empty
+                if (userMessage === '') {
+                    return; // Exit the function if the message is empty
+                }
 
-    // Send the user's message to the server for processing
-    sendMessage(userMessage);
+                // Add the user's message to the chat container and log
+                addMessage('user', userMessage);
+                messageLog.push({ role: 'user', content: userMessage });
 
-    // Clear the input field
-    inputMessage.value = '';
-  });
+                // Display the "Thinking..." message
+                addThinkingMessage();
 
-  // Function to add a message to the chat container
-  function addMessage(role, content) {
-    // Create a new <div> element for the message
-    var message = document.createElement('div');
-    message.className = 'message';
-    message.classList.add(role === 'user' ? 'user-message' : 'assistant-message');
-    message.innerText = content;
+                // Send the user's message to the server for processing
+                sendMessage(userMessage);
 
-    // Append the message to the message container
-    messageContainer.appendChild(message);
+                // Clear the input field
+                inputMessage.value = '';
+            });
 
-    // Scroll to the bottom of the message container to show the latest message
-    messageContainer.scrollTop = messageContainer.scrollHeight;
-  }
+            // Get references to the terms button and terms text
+            var termsButton = document.getElementById('terms-button');
+            var termsText = document.getElementById('terms-text');
 
-  // Function to add a "Thinking..." message to the chat container
-  function addThinkingMessage() {
-    // Create a new <div> element for the thinking message
-    var thinkingMessage = document.createElement('div');
-    thinkingMessage.id = 'thinking-message';
-    thinkingMessage.className = 'message assistant-message';
-    thinkingMessage.innerText = 'Thinking...';
+            // Add a click event listener to the terms button
+            termsButton.addEventListener('click', function () {
+                // Toggle the display of the terms text
+                if (termsText.style.display === 'none') {
+                    termsText.style.display = 'block';
+                } else {
+                    termsText.style.display = 'none';
+                }
+            });
 
-    // Append the thinking message to the message container
-    messageContainer.appendChild(thinkingMessage);
+            // Function to add a message to the chat container
+            function addMessage(role, content) {
+                // Create a new <div> element for the message
+                var message = document.createElement('div');
+                message.className = 'message';
+                message.classList.add(role === 'user' ? 'user-message' : 'assistant-message');
+                message.innerText = content;
 
-    // Scroll to the bottom of the message container to show the latest message
-    messageContainer.scrollTop = messageContainer.scrollHeight;
-  }
+                // Append the message to the message container
+                messageContainer.appendChild(message);
 
-  // Function to remove the "Thinking..." message from the chat container
-  function removeThinkingMessage() {
-    var thinkingMessage = document.getElementById('thinking-message');
-    if (thinkingMessage) {
-      thinkingMessage.remove();
-    }
-  }
+                // Scroll to the bottom of the message container to show the latest message
+                messageContainer.scrollTop = messageContainer.scrollHeight;
+            }
 
-  // Function to send a message to the server
-  function sendMessage(message) {
-    // Send a POST request to the server with the message as JSON data
-    fetch('/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ message: message }),
-    })
-      .then(function (response) {
-        // Parse the response as JSON
-        return response.json();
-      })
-      .then(function (data) {
-        // Remove the "Thinking..." message
-        removeThinkingMessage();
+            // Function to add a "Thinking..." message to the chat container
+            function addThinkingMessage() {
+                // Create a new <div> element for the thinking message
+                var thinkingMessage = document.createElement('div');
+                thinkingMessage.id = 'thinking-message';
+                thinkingMessage.className = 'message assistant-message';
+                thinkingMessage.innerText = 'Thinking...';
 
-        // Get the assistant's message from the response and add it to the chat container and log
-        var assistantMessage = data.message;
-        addMessage('assistant', assistantMessage);
-        messageLog.push({ role: 'assistant', content: assistantMessage });
-      })
-      .catch(function (error) {
-        // Log any errors that occur during the request
-        console.error('Error:', error);
-      });
-  }
-});
+                // Append the thinking message to the message container
+                messageContainer.appendChild(thinkingMessage);
+
+                // Scroll to the bottom of the message container to show the latest message
+                messageContainer.scrollTop = messageContainer.scrollHeight;
+            }
+
+            // Function to remove the "Thinking..." message from the chat container
+            function removeThinkingMessage() {
+                var thinkingMessage = document.getElementById('thinking-message');
+                if (thinkingMessage) {
+                    thinkingMessage.remove();
+                }
+            }
+
+            // Function to send a message to the server
+            function sendMessage(message) {
+                // Send a POST request to the server with the message as JSON data
+                fetch('/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message: message }),
+                })
+                    .then(function (response) {
+                        // Parse the response as JSON
+                        return response.json();
+                    })
+                    .then(function (data) {
+                        // Remove the "Thinking..." message
+                        removeThinkingMessage();
+
+                        // Get the assistant's message from the response and add it to the chat container and log
+                        var assistantMessage = data.message;
+                        addMessage('assistant', assistantMessage);
+                        messageLog.push({ role: 'assistant', content: assistantMessage });
+                    })
+                    .catch(function (error) {
+                        // Log any errors that occur during the request
+                        console.error('Error:', error);
+                    });
+            }
+        });
     </script>
 </body>
 </html>
