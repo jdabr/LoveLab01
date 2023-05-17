@@ -1,12 +1,10 @@
-    // Wait for the HTML document to finish loading
-    document.addEventListener('DOMContentLoaded', function () {
+// Wait for the HTML document to finish loading
+document.addEventListener('DOMContentLoaded', function () {
     // Get references to the necessary DOM elements
     var messageContainer = document.getElementById('message-container');
     var form = document.getElementById('chat-form');
     var inputMessage = document.getElementById('input-message');
     var messageLog = []; // Array to store the message log
-
-
 
     // Handle form submission event
     form.addEventListener('submit', function (e) {
@@ -52,6 +50,15 @@
             termsText.style.display = 'block';
         } else {
             termsText.style.display = 'none';
+        }
+    });
+
+    // Add an event listener to the terms checkbox
+    var termsCheckbox = document.getElementById('terms');
+    termsCheckbox.addEventListener('change', function () {
+        if (termsCheckbox.checked) {
+            // Checkbox is checked, remove the checkbox and button
+            termsCheckbox.parentElement.style.display = 'none';
         }
     });
 
