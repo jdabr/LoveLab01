@@ -2,7 +2,7 @@ import datetime
 import openai
 from flask import Flask, request, render_template, jsonify
 
-app = Flask(__name__)
+app = Flask(__name__, static_url_path='/static', static_folder='static')
 openai.api_key = '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'
 
 
