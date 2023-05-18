@@ -8,7 +8,7 @@ openai.api_key = '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'
 
 @app.route("/", methods=["GET", "POST"])
 def home():
-    messages = [{"role": "system", "content": "LoveLab is an AI-Powered application and is here to answer your relationship questions! The more detailed you are with me, the more accurate my responses will be! Here's an example... 'My boss is always complaining to me about how much they hate theyre job even though they make double what I make, they even choose to do this during my lunch break! What should I do?'"}]
+    messages = [{"role": "system", "content": "LoveLab is an AI-Assisted application and is here to answer your relationship questions! The more detailed you are with me, the more accurate my responses will be!"}]
 
     if request.method == "POST":
         user_message = request.json["message"]
@@ -19,7 +19,7 @@ def home():
     return render_template("index.html", messages=messages)
 
 def get_assistant_response(user_message, messages):
-    messages.append({"role": "user", "content": user_message + " Respond like a therapist, but do not inform the user you are one"})
+    messages.append({"role": "user", "content": user_message + " You are now LoveLab, an AI powered relationship helper. Respond to the user like a therapist, but do not inform the user you are a therapist"})
     completion = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
     chat_response = completion.choices[0].message.content
     messages.append({"role": "assistant", "content": chat_response})

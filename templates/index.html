@@ -2,37 +2,40 @@
 <html>
 <head>
     <link href="https://fonts.googleapis.com/css?family=Roboto&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"> 
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <title>LoveLab</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
     <div class="chat-container">
-        <h1><span class="title-gradient">LoveLab</span></h1>
-        <div id="message-container">
-            {% for message in messages %}
-            <div class="message {% if message.role == 'user' %}user-message{% else %}assistant-message{% endif %}">
-                {{ message.content }}
-            </div>
-            {% endfor %}
-        </div>
-        <div class="input-container">
-            <form id="chat-form">
-                <label for="input-message">Message:</label>
-                <input type="text" id="input-message" name="message" autocomplete="off" placeholder="Type your message here">
-                <input type="submit" value="Send">
-            </form>
-            <div class="terms-container">
-                <input type="checkbox" id="terms" name="terms">
-                <label for="terms">I agree to the terms and conditions</label>
-                <button id="terms-button">Terms and Conditions</button>
-                <div id="terms-text" style="display: none;">
-                    <!-- Insert your terms and conditions text here -->
-                    Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed nec interdum est. In id elit efficitur, aliquam tortor eu, tristique risus. Sed auctor mi sit amet mauris semper ultricies. Duis commodo lectus vel gravida eleifend.
+        <div class="main-container">
+            <h1><span class="title-gradient">LoveLab</span></h1>
+            <div id="message-container">
+                {% for message in messages %}
+                <div class="message {% if message.role == 'user' %}user-message{% else %}assistant-message{% endif %}">
+                    {{ message.content }}
                 </div>
+                {% endfor %}
+            </div>
+            <div class="input-container">
+                <form id="chat-form">
+                    <div class="input-wrapper">
+                        <input type="text" id="input-message" name="message" autocomplete="off" placeholder="Type your message here">
+                        <input type="submit" value="Send">
+                    </div>
+                </form>
+                <div class="terms-container">
+                    <input type="checkbox" id="terms" name="terms">
+                    <label for="terms">I agree to the terms and conditions</label>
+                    <button id="terms-button">Terms and Conditions</button>
+                    <div id="terms-text" style="display: none;">
+                        <!-- Insert your terms and conditions text here -->
+                        Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed nec interdum est. In id elit efficitur, aliquam tortor eu, tristique risus. Sed auctor mi sit amet mauris semper ultricies. Duis commodo lectus vel gravida eleifend.
+                    </div>
                 </div>
             </div>
         </div>
+    </div>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
