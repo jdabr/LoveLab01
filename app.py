@@ -1,6 +1,8 @@
 import datetime
 import openai
 from flask import Flask, request, render_template, jsonify
+import pymysql.cursors
+
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 openai.api_key = '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'
@@ -42,10 +44,32 @@ def get_assistant_response(user_message, messages):
 
 def log_message(user_message, assistant_message):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open("chat_log.text", "a") as log_file:
-        log_file.write(f"{timestamp} User: {user_message}\n")
-        log_file.write(f"{timestamp} Assistant: {assistant_message}\n")
-        log_file.write("\n")
+
+    # Connect to the database
+    connection = pymysql.connect(
+        host='localhost',
+        user='root',
+        password='password',
+        database='messages',
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
+    try:
+        with connection.cursor() as cursor:
+            # Insert the user message
+            sql = "INSERT INTO chat_log (timestamp, role, content) VALUES (%s, %s, %s)"
+            cursor.execute(sql, (timestamp, "user", user_message))
+
+            # Insert the assistant message
+            sql = "INSERT INTO chat_log (timestamp, role, content) VALUES (%s, %s, %s)"
+            cursor.execute(sql, (timestamp, "assistant", assistant_message))
+
+        # Commit the changes
+        connection.commit()
+
+    finally:
+        # Close the connection
+        connection.close()
 
 if __name__ == "__main__":
     app.run()
