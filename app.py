@@ -11,10 +11,10 @@ app = Flask(__name__, static_url_path='/static', static_folder='static')
 ENV = 'prod'
 
 if ENV == 'dev':
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:#Joeyd123$56789@localhost/loveLab'
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:password@localhost/loveLab'
 
 else:
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('postgres://cjdhnauiqyworu:f729fbd00f5d4fc6072dbfe47361bc225fc35a2a984662ad47770d19022980da@ec2-3-232-103-50.compute-1.amazonaws.com:5432/d4cofq8s9810n9')
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://cjdhnauiqyworu:f729fbd00f5d4fc6072dbfe47361bc225fc35a2a984662ad47770d19022980da@ec2-3-232-103-50.compute-1.amazonaws.com:5432/d4cofq8s9810n9'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
