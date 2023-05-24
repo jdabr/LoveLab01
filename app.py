@@ -1,9 +1,15 @@
 import datetime
 import openai
+import os
 from flask import Flask, request, render_template, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 
+db_user = os.environ.get('DB_USER')
+db_pass = os.environ.get('DB_PASS')
+db_name = os.environ.get('DB_NAME')
+api_key = os.environ.get('OPENAI_API')
+openai.api_key = '{}'.format(api_key)
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 
@@ -13,7 +19,8 @@ if ENV == 'dev':
     app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:password@localhost/loveLab'
 
 else:
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://cjdhnauiqyworu:f729fbd00f5d4fc6072dbfe47361bc225fc35a2a984662ad47770d19022980da@ec2-3-232-103-50.compute-1.amazonaws.com:5432/d4cofq8s9810n9'
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://{}:{}/{}'.format(db_user,db_pass,db_name)
+
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -24,9 +31,6 @@ class ChatLog(db.Model):
     timestamp = db.Column(db.DateTime, nullable=False)
     user_message = db.Column(db.String(255), nullable=False)
     assistant_message = db.Column(db.String(3000), nullable=False)
-
-
-openai.api_key = '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'
 
 
 @app.route("/", methods=["GET", "POST"])
