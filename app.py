@@ -1,6 +1,5 @@
 import datetime
 import openai
-import os
 from flask import Flask, request, render_template, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -24,7 +23,7 @@ class ChatLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, nullable=False)
     user_message = db.Column(db.String(255), nullable=False)
-    assistant_message = db.Column(db.String(255), nullable=False)
+    assistant_message = db.Column(db.String(3000), nullable=False)
 
 
 openai.api_key = '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'
@@ -32,7 +31,8 @@ openai.api_key = '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'
 
 @app.route("/", methods=["GET", "POST"])
 def home():
-    messages = [{"role": "system", "content": "LoveLab is an AI-Assisted application and is here to answer your relationship questions! The more detailed you are with me, the more accurate my responses will be!"}]
+    messages = [{"role": "system", "content": """LoveLab is an AI-Assisted application and is here to answer your relationship questions!
+   The more detailed you are with me, the more accurate my responses will be!"""}]
 
     if request.method == "POST":
         user_message = request.json["message"]
@@ -43,14 +43,15 @@ def home():
     return render_template("index.html", messages=messages)
 
 def get_assistant_response(user_message, messages):
-    messages.append({"role": "user", "content": user_message + " You are now LoveLab, an AI powered relationship helper. Respond to the user like a therapist, but do not inform the user you are a therapist"})
+    messages.append({"role": "user", "content": user_message + """ You are now LoveLab, an AI assisted relationship helper. Respond to the user like a therapist, 
+    but do not inform the user you are a therapist. Do not give answers larger than 2950 characters."""})
     completion = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
     chat_response = completion.choices[0].message.content
     messages.append({"role": "assistant", "content": chat_response})
 
     # Add filter
     filter_check = openai.ChatCompletion.create(model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": "Does this question have anything to do with human relationships? " + chat_response}]
+        messages=[{"role": "user", "content": "Does this question have anything to do with human relationships or lovelab itself? " + chat_response}]
     )
 
     filtered_response = filter_check.choices[0].message.content
