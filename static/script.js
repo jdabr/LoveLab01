@@ -46,7 +46,34 @@ class ChatApp {
     }
 
     toggleTermsText() {
-        window.location.href = "/terms";
+        fetch('static/TermsAndConditions.txt')
+            .then(response => response.text())
+            .then(termsContent => {
+                const modal = document.createElement('div');
+                modal.className = 'modal';
+
+                const content = document.createElement('div');
+                content.className = 'modal-content';
+
+                const closeButton = document.createElement('span');
+                closeButton.className = 'close-button';
+                closeButton.innerHTML = '&times;';
+
+                const termsText = document.createElement('p');
+                termsText.innerText = termsContent;
+
+                content.appendChild(closeButton);
+                content.appendChild(termsText);
+                modal.appendChild(content);
+                document.body.appendChild(modal);
+
+                closeButton.addEventListener('click', () => {
+                    modal.remove();
+                });
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
     }
 
     handleTermsCheckboxChange() {

@@ -1,4 +1,5 @@
 import datetime
+from flask.templating import render_template_string
 import openai
 import os
 from flask import Flask, request, render_template, jsonify, session, send_file
@@ -113,11 +114,6 @@ def home():
         session["messages"].append(initial_message)
 
     return render_template("index.html", messages=session["messages"])
-
-@app.route("/terms")
-def terms():
-    return "Hello"
-
 
 if __name__ == "__main__":
     app.run()
