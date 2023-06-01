@@ -46,7 +46,7 @@ class ChatApp {
     }
 
     toggleTermsText() {
-        this.termsText.style.display = this.termsText.style.display === 'none' ? 'block' : 'none';
+        window.location.href = "/terms";
     }
 
     handleTermsCheckboxChange() {

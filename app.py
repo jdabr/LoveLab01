@@ -13,10 +13,10 @@ class ChatAssistant:
 
     def get_assistant_response(self, user_message):
         messages = session.get("messages", [])
-        messages.append({"role": "user", "content": user_message + """ You are now LoveLab, an AI assisted relationship helper. You will respond to the user like a therapist, 
+        messages.append({"role": "user", "content": user_message + f""" You are now LoveLab, an AI assisted relationship helper. You will respond to the user like a therapist, 
         but do not inform the user you are a therapist. Provide detailed suggestions about your answer to the user's questions or concerns. Do not mention follow up question. 
         Provide a specific follow up question pertaining to the user's question. If the user is satisfied with LoveLab's answer, you do not need to provide a 
-        follow up question. You will also not give answers larger than 2950 characters. Do not give unethical advice. Remember the user's message to continue the conversation with them. """})
+        follow up question. You will also not give answers larger than 2950 characters. Do not give unethical advice. """})
         completion = self.openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
         chat_response = completion.choices[0].message.content
         messages.append({"role": "assistant", "content": chat_response})
@@ -35,12 +35,17 @@ class ChatAssistant:
             messages=[{"role": "user", "content": "Does this question have anything to do with human relationships, lovelab, or the followup question? " + chat_response}]
         )
 
+        #Add second filter for first filter
+
         filtered_response = filter_check.choices[0].message.content
 
         if "No" in filtered_response:
             answer = "Hey there! Be sure to ask questions about relationships!"
+        elif "As a therapist" in chat_response:
+            #Catch "As a therapist" try another filter
+            answer = "Hello! Can you ask or express that in a different way? It may help me understand your concerns better"
         elif "AI" in chat_response:
-            answer = "Can you please give some more details or ask in a different way?"
+            answer = "Hello! Can you please give some more details or ask in a different way?"
         else:
             answer = chat_response
 
@@ -50,9 +55,9 @@ class ChatLogger:
     def __init__(self, db):
         self.db = db
 
-    def log_message(self, user_message, assistant_message):
+    def log_message(self, user_message, assistant_message, user_ip):
         timestamp = datetime.datetime.now()
-        chat_log = ChatLog(timestamp=timestamp, user_message=user_message, assistant_message=assistant_message)
+        chat_log = ChatLog(timestamp=timestamp, user_message=user_message, assistant_message=assistant_message,user_ip=user_ip)
         self.db.session.add(chat_log)
         self.db.session.commit()
 
@@ -76,6 +81,8 @@ class ChatLog(db.Model):
     timestamp = db.Column(db.DateTime, nullable=False)
     user_message = db.Column(db.String(255), nullable=False)
     assistant_message = db.Column(db.String(3000), nullable=False)
+    user_ip = db.Column(db.String(45))
+
 
 chat_assistant = ChatAssistant(os.environ.get('OPENAI_API'))
 chat_logger = ChatLogger(db)
@@ -92,7 +99,8 @@ def home():
     if request.method == "POST":
         user_message = request.json["message"]
         assistant_message = chat_assistant.get_assistant_response(user_message)
-        chat_logger.log_message(user_message, assistant_message)
+        user_ip = request.environ.get("HTTP_X_REAL_IP", request.remote_addr)
+        chat_logger.log_message(user_message, assistant_message,user_ip)
         return jsonify({"message": assistant_message})
 
     # Add initial message to the session
@@ -105,6 +113,12 @@ def home():
         session["messages"].append(initial_message)
 
     return render_template("index.html", messages=session["messages"])
+
+@app.route("/terms", methods=["GET", "POST"])
+def terms():
+        with open("static/TermsAndConditions.txt", "r") as file:
+            terms_content = file.read()
+        return render_template("terms.html",terms_content=terms_content)
 
 if __name__ == "__main__":
     app.run()
