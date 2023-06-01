@@ -1,7 +1,7 @@
 import datetime
 import openai
 import os
-from flask import Flask, request, render_template, jsonify, session
+from flask import Flask, request, render_template, jsonify, session, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 
@@ -114,7 +114,7 @@ def home():
 
     return render_template("index.html", messages=session["messages"])
 
-@app.route("/terms", methods=["GET", "POST"])
+@app.route("/terms")
 def terms():
         with open("static/TermsAndConditions.txt", "r") as file:
             terms_content = file.read()
