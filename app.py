@@ -116,9 +116,8 @@ def home():
 
 @app.route("/terms")
 def terms():
-        with open("static/TermsAndConditions.txt", "r") as file:
-            terms_content = file.read()
-        return render_template("terms.html",terms_content=terms_content)
+    return "Hello"
+
 
 if __name__ == "__main__":
     app.run()
