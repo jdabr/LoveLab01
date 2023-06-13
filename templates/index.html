@@ -8,16 +8,23 @@
 </head>
 
 <body>
-    <div class="sidebar">
-        <ul>
-           <!-- <li><a href="#">History</a></li>
-            <li><a href="#">Login</a></li>
-           -->
-        </ul>
-    </div>
     <div class="chat-container">
         <div class="main-container">
+            <div class="hamburger" id="hamburger-menu">
+                <div class="hamburger-line"></div>
+                <div class="hamburger-line"></div>
+                <div class="hamburger-line"></div>
+            </div>
             <h1><span class="title-gradient">LoveLab</span></h1>
+            <div class="mobile-menu" id="mobile-menu">
+                <div class="mobile-menu-content">
+                    <ul>
+                        <li><a href="#">Examples</a></li>
+                        <li><a href="#">About</a></li>
+                        <li><a href="#">Contact</a></li>
+                    </ul>
+                </div>
+            </div>
             <div id="message-container">
                 {% for message in messages %}
                 <div class="message {% if message.role == 'user' %}user-message{% else %}assistant-message{% endif %}">

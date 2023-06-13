@@ -12,6 +12,8 @@ class ChatApp {
         this.termsCheckbox = document.getElementById('terms');
         this.termsButton = document.getElementById('terms-button');
         this.termsText = document.getElementById('terms-text');
+        this.mobileMenu = document.getElementById('mobile-menu');
+        this.hamburgerMenu = document.getElementById('hamburger-menu');
         this.messageLog = []; // Array to store the message log
     }
 
@@ -19,6 +21,7 @@ class ChatApp {
         this.form.addEventListener('submit', (e) => this.handleSubmit(e));
         this.termsButton.addEventListener('click', () => this.toggleTermsText());
         this.termsCheckbox.addEventListener('change', () => this.handleTermsCheckboxChange());
+        this.hamburgerMenu.addEventListener('click', () => this.toggleMobileMenu());
     }
 
     handleSubmit(e) {
@@ -97,6 +100,10 @@ class ChatApp {
         if (thinkingMessage) {
             thinkingMessage.remove();
         }
+    }
+
+    toggleMobileMenu() {
+        this.mobileMenu.classList.toggle('active');
     }
 
     sendMessage(message) {
