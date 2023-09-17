@@ -38,7 +38,7 @@ body {
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
-/* Styles for the input container */
+/* Styles for the input container, this is where send button is contained even though it's named submit (goes up to line 70) */
 .input-container {
     margin-top: 20px;
     text-align: center;
@@ -63,6 +63,10 @@ body {
         cursor: pointer;
         transition: background-color 0.3s ease;
     }
+
+.input-container input[type="submit"]:hover {
+            transition: transform 0.3s ease, background-color 0.3s ease;
+        }
 
         /* Hover state for the submit button */
         .input-container input[type="submit"]:hover {
@@ -99,8 +103,14 @@ body {
     transition: background-color 0.3s ease;
 }
 
+#terms-button {
+    transition: transform 0.3s ease, background-color 0.3s ease;
+}
+
+    /* Hover state */
     #terms-button:hover {
         background-color: #45a049;
+        transform: scale(1.1);
     }
 
 .modal {
