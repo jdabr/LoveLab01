@@ -1,6 +1,9 @@
 {
   "ExpandedNodes": [
-    ""
+    "",
+    "\\.idea",
+    "\\migrations"
   ],
+  "SelectedNode": "\\migrations\\README",
   "PreviewInSolutionExplorer": false
 }

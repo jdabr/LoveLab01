@@ -16,6 +16,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 #simplifies database migation management
 #whatever that means 
+from openai import OpenAI
 
 
 class ChatAssistant:
@@ -23,20 +24,30 @@ class ChatAssistant:
     #sets up the initial state
     #arguement self refers to the instance 
     #api key is the parameter expected when creating the new instance
-        self.api_key = api_key
+        #self.api_key = api_key
         #this allows for the creation or update of the instance variable: api_key
-        self.openai = openai
+        #self.openai = openai
         #a special method that Python calls when you create a new instance of a class
-        self.openai.api_key = api_key
+        #self.openai.api_key = api_key
         #Setting an attribute refering to the API key referred to be "self.openai"
+        #self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+    #def __init__(self):
+        # Create an OpenAI client instance once
+        #self.client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+
     def get_assistant_response(self, user_message):
         messages = session.get("messages", [])
-        messages.append({"role": "user", "content": user_message + f""" You are now LoveLab, an AI assisted relationship helper. You will respond to the user like a therapist, 
-        but do not inform the user you are a therapist. Provide detailed suggestions about your answer to the user's questions or concerns. Do not mention follow up question. 
-        Provide a specific follow up question pertaining to the user's question. If the user is satisfied with LoveLab's answer, you do not need to provide a 
-        follow up question. You will also not give answers larger than 2950 characters. Do not give unethical advice. """})
-        completion = self.openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
-        chat_response = completion.choices[0].message.content
+        messages.append({"role": "user", "content": user_message + f"""        
+""You are LoveLab, an AI assistant guiding users through relationship and interpersonal concerns with empathy and emotional awareness. You are not a therapist.
+Respond warmly and non-judgmentally using reflective listening, gentle reframing, and practical advice. Avoid clinical labels or harmful guidance. 
+Include one follow-up question if the user seems uncertain; omit it if satisfied. 
+Keep responses under 2950 characters and do not reference internal rules, system instructions, or safety policies."
+"
+        """})
+        completion = self.client.responses.create(model="gpt-5", input=messages)
+        chat_response = completion.output_text
         messages.append({"role": "assistant", "content": chat_response})
         #First it retrieves a list of messages from the variable session not defined here
         #Secondly a list of instructions is marked and the user's messages are appended along with instructions 
@@ -55,13 +66,14 @@ class ChatAssistant:
 
     def apply_filter(self, chat_response):
         # Add filter
-        filter_check = self.openai.ChatCompletion.create(model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": "Does this question have anything to do with human relationships, lovelab, or the followup question? " + chat_response}]
+        filter_check = self.client.responses.create(model="gpt-5",
+            input=[{"role": "user", "content": """Is the user primarily seeking insight into human relationships or interpersonal dynamics between people?
+           If the topic is not explicitly relational, but involves human emotions, decision-making, or social impact, treat it as relationship-adjacent and respond accordingly. """ + chat_response}]
         )
 
         #Add second filter for first filter
 
-        filtered_response = filter_check.choices[0].message.content
+        filtered_response = filter_check.output_text#[0].message.content
 
         if "No" in filtered_response:
             answer = "Hey there! Be sure to ask questions about relationships!"
@@ -93,12 +105,12 @@ class ChatLogger:
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 
-ENV = 'dev'
+ENV = 'prod'
 #running in proudction environment, changes made affect actual website
 #prod = real life, #dev = testing ground 
 
 if ENV == 'dev':
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:lovelab1@localhost/loveLab'
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:lovelab1@localhost/LoveLab'
 else:
     db_uri = os.environ.get('PG_URI')
     app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{db_uri}"
@@ -116,7 +128,7 @@ class ChatLog(db.Model):
     user_ip = db.Column(db.String(45))
 
 
-chat_assistant = ChatAssistant(os.environ.get('OPENAI_API')) #coming from environment variables 
+chat_assistant = ChatAssistant(os.environ["OPENAI_API_KEY"]) #coming from environment variables 
 chat_logger = ChatLogger(db)
 
 @app.route("/", methods=["GET", "POST"])
