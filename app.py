@@ -66,7 +66,7 @@ Keep responses under 2950 characters and do not reference internal rules, system
 
     def apply_filter(self, chat_response):
         # Add filter
-        filter_check = self.client.responses.create(model="gpt-5",
+        filter_check = self.client.responses.create(model="gpt-5-mini",
             input=[{"role": "user", "content": """Is the user primarily seeking insight into human relationships or interpersonal dynamics between people?
            If the topic is not explicitly relational, but involves human emotions, decision-making, or social impact, treat it as relationship-adjacent and respond accordingly. """ + chat_response}]
         )
