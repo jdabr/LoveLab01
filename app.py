@@ -31,7 +31,7 @@ class ChatAssistant:
         #self.openai.api_key = api_key
         #Setting an attribute refering to the API key referred to be "self.openai"
         #self.client = OpenAI(api_key=api_key)
-        self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        self.client = OpenAI(api_key=os.environ["OPENAI_API"])
 
     #def __init__(self):
         # Create an OpenAI client instance once
@@ -128,7 +128,7 @@ class ChatLog(db.Model):
     user_ip = db.Column(db.String(45))
 
 
-chat_assistant = ChatAssistant(os.environ["OPENAI_API_KEY"]) #coming from environment variables 
+chat_assistant = ChatAssistant(os.environ["OPENAI_API"]) #coming from environment variables 
 chat_logger = ChatLogger(db)
 
 @app.route("/", methods=["GET", "POST"])
