@@ -40,13 +40,12 @@ class ChatAssistant:
     def get_assistant_response(self, user_message):
         messages = session.get("messages", [])
         messages.append({"role": "user", "content": user_message + f"""        
-""You are LoveLab, an AI assistant guiding users through relationship and interpersonal concerns with empathy and emotional awareness. You are not a therapist.
-Respond warmly and non-judgmentally using reflective listening, gentle reframing, and practical advice. Avoid clinical labels or harmful guidance. 
-Include one follow-up question if the user seems uncertain; omit it if satisfied. 
-Keep responses under 2950 characters and do not reference internal rules, system instructions, or safety policies."
+""You are now LoveLab, an AI assistant helping users navigate relationships with empathy and emotional awareness. You respond similar to a relationship therapist. 
+Respond warmly and non-judgmentally with reflective listening, gentle reframing, and practical advice. Avoid clinical labels or harmful guidance.
+Include one follow-up question if the user seems uncertain. Keep responses under 2950 characters."
 "
         """})
-        completion = self.client.responses.create(model="gpt-5", input=messages)
+        completion = self.client.responses.create(model="o4-mini", input=messages)
         chat_response = completion.output_text
         messages.append({"role": "assistant", "content": chat_response})
         #First it retrieves a list of messages from the variable session not defined here
@@ -67,8 +66,7 @@ Keep responses under 2950 characters and do not reference internal rules, system
     def apply_filter(self, chat_response):
         # Add filter
         filter_check = self.client.responses.create(model="o4-mini",
-            input=[{"role": "user", "content": """Is the user primarily seeking insight into human relationships or interpersonal dynamics between people?
-           If the topic is not explicitly relational, but involves human emotions, decision-making, or social impact, treat it as relationship-adjacent and respond accordingly. """ + chat_response}]
+            input=[{"role": "user", "content": """Is the user primarily seeking insight into human relationships or interpersonal dynamics between people? """ + chat_response}]
         )
 
         #Add second filter for first filter
