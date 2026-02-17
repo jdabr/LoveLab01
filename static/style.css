@@ -1,7 +1,6 @@
 ﻿@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
 /* ── CSS Variables ── */
-/* Default dark mode */
 :root {
     --bg-primary: #212121;
     --bg-secondary: #2f2f2f;
@@ -16,7 +15,6 @@
     --shadow: rgba(0, 0, 0, 0.3);
 }
 
-/* Light mode */
 [data-theme="light"] {
     --bg-primary: #f9f9f9;
     --bg-secondary: #ffffff;
@@ -39,7 +37,7 @@
 }
 
 body {
-    font-family: 'Inter', 'Roboto', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background-color: var(--bg-primary);
     color: var(--text-primary);
     height: 100vh;
@@ -126,10 +124,7 @@ body {
     scrollbar-color: var(--border-color) transparent;
 }
 
-#message-container::-webkit-scrollbar {
-    width: 6px;
-}
-
+#message-container::-webkit-scrollbar { width: 6px; }
 #message-container::-webkit-scrollbar-thumb {
     background-color: var(--border-color);
     border-radius: 3px;
@@ -200,9 +195,7 @@ body {
     font-size: 0.95rem;
 }
 
-.input-wrapper input[type="text"]::placeholder {
-    color: var(--text-secondary);
-}
+.input-wrapper input[type="text"]::placeholder { color: var(--text-secondary); }
 
 .input-wrapper input[type="submit"] {
     background-color: var(--accent);
@@ -228,12 +221,10 @@ body {
     align-items: center;
     justify-content: center;
     gap: 10px;
-    margin-top: 12px;
+    margin: 12px auto 0;
     font-size: 0.8rem;
     color: var(--text-secondary);
     max-width: 720px;
-    margin-left: auto;
-    margin-right: auto;
 }
 
 #terms-button {
@@ -256,10 +247,7 @@ body {
 .modal {
     position: fixed;
     z-index: 9999;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    inset: 0;
     background-color: rgba(0, 0, 0, 0.6);
     display: flex;
     align-items: center;
@@ -287,9 +275,7 @@ body {
     transition: color 0.2s ease;
 }
 
-.close-button:hover {
-    color: var(--accent);
-}
+.close-button:hover { color: var(--accent); }
 
 p {
     margin-bottom: 10px;
@@ -339,10 +325,7 @@ p {
 /* ── Mobile Menu ── */
 .mobile-menu {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    inset: 0;
     background-color: rgba(0, 0, 0, 0.6);
     display: none;
     align-items: center;
@@ -351,9 +334,7 @@ p {
     backdrop-filter: blur(4px);
 }
 
-.mobile-menu.active {
-    display: flex;
-}
+.mobile-menu.active { display: flex; }
 
 .mobile-menu-content {
     background-color: var(--bg-secondary);
@@ -378,27 +359,28 @@ p {
     transition: color 0.2s ease;
 }
 
-.mobile-menu-content ul li a:hover {
-    color: var(--accent);
+.mobile-menu-content ul li a:hover { color: var(--accent); }
+
+/* ── About Page ── */
+.about-container {
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
 }
 
-/* ── Responsive ── */
-@media (max-width: 768px) {
-    .sidebar {
-        display: none;
-    }
+.about-container h2 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
 
-    .hamburger {
-        display: flex;
-    }
-
-    .user-message {
-        max-width: 85%;
-    }
-
-    .assistant-message {
-        max-width: 95%;
-    }
+.about-container p {
+    color: var(--text-secondary);
+    line-height: 1.7;
 }
 
 /* ── Thinking Animation ── */
@@ -422,58 +404,18 @@ p {
 .dot:nth-child(3) { animation-delay: 0.4s; }
 
 @keyframes thinking {
-    0%, 60%, 100% {
-        transform: translateY(0);
-        opacity: 0.4;
-    }
-    30% {
-        transform: translateY(-6px);
-        opacity: 1;
-    }
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-6px); opacity: 1; }
 }
 
-css/* ── About Page ── */
-.about-container {
-    max-width: 720px;
-    margin: 40px auto;
-    padding: 0 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-}
-
-.about-container h2 {
-    font-size: 1.2rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 8px;
-}
-
-.about-container p {
-    color: var(--text-secondary);
-    line-height: 1.7;
-}
-
+/* ── Responsive / Mobile ── */
 @media (max-width: 768px) {
-    .sidebar {
-        display: none;
-    }
+    .sidebar { display: none; }
+    .hamburger { display: flex; }
+    .user-message { max-width: 85%; }
+    .assistant-message { max-width: 95%; }
 
-    .hamburger {
-        display: flex;
-    }
-
-    .user-message {
-        max-width: 85%;
-    }
-
-    .assistant-message {
-        max-width: 95%;
-    }
-
-    /* Fix terms container on mobile */
     .terms-container {
-        display: flex;
         flex-direction: column;
         align-items: center;
         gap: 8px;
@@ -481,24 +423,14 @@ css/* ── About Page ── */
         font-size: 0.75rem;
     }
 
-    .terms-container label {
-        text-align: center;
-    }
+    .terms-container label { text-align: center; }
 
     #terms-button {
         width: 100%;
         max-width: 280px;
     }
 
-    .input-container {
-        padding: 12px 16px 16px;
-    }
+    .input-container { padding: 12px 16px 16px; }
 
-    .input-wrapper {
-        flex-direction: row;
-    }
-
-    .input-wrapper input[type="text"] {
-        font-size: 0.85rem;
-    }
+    .input-wrapper input[type="text"] { font-size: 0.85rem; }
 }
