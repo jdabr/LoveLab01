@@ -2,10 +2,31 @@
 
 // Wait for the HTML document to finish loading before initializing the app
 document.addEventListener('DOMContentLoaded', function () {
-    var chatApp = new ChatApp();
-    chatApp.init();
+    // Only initialize ChatApp if we are on the main chat page
+    if (document.getElementById('chat-form')) {
+        var chatApp = new ChatApp();
+        chatApp.init();
+    }
 
+    // Initialize theme manager on every page
     new ThemeManager('theme-toggle');
+
+    // Handle hamburger separately
+    const hamburger = document.getElementById('hamburger-menu');
+    const mobileMenu = document.getElementById('mobile-menu');
+    if (hamburger && mobileMenu) {
+        hamburger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            mobileMenu.classList.toggle('active');
+        });
+
+        // Close menu when clicking outside of it
+        document.addEventListener('click', (e) => {
+            if (!hamburger.contains(e.target) && !mobileMenu.contains(e.target)) {
+                mobileMenu.classList.remove('active');
+            }
+        });
+    }
 });
 
 // Manages the dark/light mode toggle and persists the user's preference
@@ -65,16 +86,14 @@ class ChatApp {
         this.termsButton = document.getElementById('terms-button');
         this.termsText = document.getElementById('terms-text');
         this.mobileMenu = document.getElementById('mobile-menu');
-        this.hamburgerMenu = document.getElementById('hamburger-menu');
         this.messageLog = [];
     }
 
-    // Attaches event listeners to the form, terms button, checkbox, and hamburger menu
+    // Attaches event listeners to the form, terms button and checkbox
     init() {
         this.form.addEventListener('submit', (e) => this.handleSubmit(e));
         this.termsButton.addEventListener('click', () => this.toggleTermsText());
         this.termsCheckbox.addEventListener('change', () => this.handleTermsCheckboxChange());
-        this.hamburgerMenu.addEventListener('click', () => this.toggleMobileMenu());
     }
 
     // Validates the form, adds the user message to the chat, and sends it to the server
@@ -94,11 +113,8 @@ class ChatApp {
 
         this.addMessage('user', userMessage);
         this.messageLog.push({ role: 'user', content: userMessage });
-
         this.addThinkingMessage();
-
         this.sendMessage(userMessage);
-
         this.inputMessage.value = '';
     }
 
@@ -159,11 +175,6 @@ class ChatApp {
         if (thinkingMessage) {
             thinkingMessage.remove();
         }
-    }
-
-    // Toggles the mobile navigation menu open and closed
-    toggleMobileMenu() {
-        this.mobileMenu.classList.toggle('active');
     }
 
     // Sends the user message to the Flask server and displays the assistant response

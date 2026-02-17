@@ -109,6 +109,9 @@ body {
     font-weight: 500;
     color: var(--text-secondary);
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 /* ── Message Container ── */
@@ -318,13 +321,11 @@ p {
 /* ── Hamburger (mobile) ── */
 .hamburger {
     display: none;
-    position: absolute;
-    top: 16px;
-    left: 16px;
     cursor: pointer;
     z-index: 9999;
     flex-direction: column;
     gap: 5px;
+    flex-shrink: 0;
 }
 
 .hamburger-line {
@@ -451,4 +452,22 @@ css/* ── About Page ── */
 .about-container p {
     color: var(--text-secondary);
     line-height: 1.7;
+}
+
+@media (max-width: 768px) {
+    .sidebar {
+        display: none;
+    }
+
+    .hamburger {
+        display: flex;
+    }
+
+    .user-message {
+        max-width: 85%;
+    }
+
+    .assistant-message {
+        max-width: 95%;
+    }
 }
