@@ -151,11 +151,12 @@ class ChatApp {
     }
 
     // Hides the terms checkbox once the user has agreed
-    handleTermsCheckboxChange() {
-        if (this.termsCheckbox.checked) {
-            this.termsCheckbox.parentElement.style.display = 'none';
+        handleTermsCheckboxChange() {
+            if (this.termsCheckbox.checked) {
+                this.termsCheckbox.style.display = 'none';
+                document.querySelector('label[for="terms"]').style.display = 'none';
+            }
         }
-    }
 
     // Creates a new Message instance and renders it in the chat container
     addMessage(role, content) {
