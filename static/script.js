@@ -1,8 +1,48 @@
-// Wait for the HTML document to finish loading
-document.addEventListener('DOMContentLoaded', function () {
+﻿document.addEventListener('DOMContentLoaded', function () {
     var chatApp = new ChatApp();
     chatApp.init();
+
+    new ThemeManager('theme-toggle');
 });
+
+class ThemeManager {
+    constructor(toggleBtnId) {
+        this.toggleBtn = document.getElementById(toggleBtnId);
+        this.darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        this.init();
+    }
+
+    getPreferredTheme() {
+        return localStorage.getItem('theme') ||
+            (this.darkMediaQuery.matches ? 'dark' : 'light');
+    }
+
+    applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        this.toggleBtn.textContent = theme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+    }
+
+    toggle() {
+        const current = document.documentElement.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('theme', next);
+        this.applyTheme(next);
+    }
+
+    watchSystemTheme() {
+        this.darkMediaQuery.addEventListener('change', (e) => {
+            if (!localStorage.getItem('theme')) {
+                this.applyTheme(e.matches ? 'dark' : 'light');
+            }
+        });
+    }
+
+    init() {
+        this.applyTheme(this.getPreferredTheme());
+        this.toggleBtn.addEventListener('click', () => this.toggle());
+        this.watchSystemTheme();
+    }
+}
 
 class ChatApp {
     constructor() {
@@ -14,7 +54,7 @@ class ChatApp {
         this.termsText = document.getElementById('terms-text');
         this.mobileMenu = document.getElementById('mobile-menu');
         this.hamburgerMenu = document.getElementById('hamburger-menu');
-        this.messageLog = []; // Array to store the message log
+        this.messageLog = [];
     }
 
     init() {
@@ -25,7 +65,7 @@ class ChatApp {
     }
 
     handleSubmit(e) {
-        e.preventDefault(); // Prevent the form from being submitted and the page from refreshing
+        e.preventDefault();
 
         if (!this.termsCheckbox.checked) {
             alert('Please agree to the terms and conditions to continue using the app.');
@@ -139,8 +179,21 @@ class Message {
 
 class ThinkingMessage extends Message {
     constructor() {
-        super('assistant', 'Thinking...');
+        super('assistant', '');
         this.id = 'thinking-message';
+    }
+
+    display(container) {
+        const message = document.createElement('div');
+        message.className = 'message assistant-message thinking-message';
+        message.id = 'thinking-message';
+        message.innerHTML = `
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+        `;
+        container.appendChild(message);
+        container.scrollTop = container.scrollHeight;
     }
 }
 

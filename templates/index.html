@@ -1,54 +1,87 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html>
 <head>
-    <link href="https://fonts.googleapis.com/css?family=Roboto&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <title>LoveLab</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Anti-flash script: applies theme before page renders -->
+    <script>
+        (function() {
+            const saved = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const theme = saved || (prefersDark ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
 </head>
-
 <body>
-    <div class="chat-container">
-        <div class="main-container">
-            <div class="hamburger" id="hamburger-menu">
-                <div class="hamburger-line"></div>
-                <div class="hamburger-line"></div>
-                <div class="hamburger-line"></div>
-            </div
-            <h1><span class="title-gradient">LoveLab</span></h1>
-            <div class="mobile-menu" id="mobile-menu">
-                <div class="mobile-menu-content">
-                    <ul>
-                        <li><a href="#">Examples</a></li>
-                        <li><a href="#">About</a></li>
-                        <li><a href="#">Contact</a></li>
-                    </ul>
-                </div>
-            </div>
-            <div id="message-container">
-                {% for message in messages %}
-                <div class="message {% if message.role == 'user' %}user-message{% else %}assistant-message{% endif %}">
-                    {{ message.content }}
-                </div>
-                {% endfor %}
-            </div>
-            <div class="input-container"><!-- this is where to work for button  -->
-                <form id="chat-form">
-                    <div class="input-wrapper">
-                        <input type="text" id="input-message" name="message" autocomplete="off" placeholder="Type your message here">
-                        <input type="submit" value="Send">
-                    </div> <!-- end for send button -->
-                </form>
-                <div class="terms-container">
-                    <input type="checkbox" id="terms" name="terms">
-                    <label for="terms">I agree to the terms and conditions</label>
-                    <button id="terms-button">Terms and Conditions</button>
-                    <div id="terms-text" style="display: none;">
-                    </div>
-                </div>
-            </div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-logo">LoveLab</div>
+        <nav>
+            <ul>
+                <li><a href="#">Examples</a></li>
+                <li><a href="#">About</a></li>
+                <li><a href="#">Contact</a></li>
+            </ul>
+        </nav>
+    </aside>
+
+    <!-- Hamburger (mobile only) -->
+    <div class="hamburger" id="hamburger-menu">
+        <div class="hamburger-line"></div>
+        <div class="hamburger-line"></div>
+        <div class="hamburger-line"></div>
+    </div>
+
+    <!-- Mobile Menu -->
+    <div class="mobile-menu" id="mobile-menu">
+        <div class="mobile-menu-content">
+            <ul>
+                <li><a href="#">Examples</a></li>
+                <li><a href="#">About</a></li>
+                <li><a href="#">Contact</a></li>
+            </ul>
         </div>
     </div>
+
+    <!-- Main Chat Area -->
+    <div class="main-container">
+
+        <div class="chat-header">
+            LoveLab
+        </div>
+
+        <div id="message-container">
+            {% for message in messages %}
+            <div class="message {% if message.role == 'user' %}user-message{% else %}assistant-message{% endif %}">
+                {{ message.content }}
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="input-container">
+            <form id="chat-form">
+                <div class="input-wrapper">
+                    <input type="text" id="input-message" name="message" autocomplete="off" placeholder="Type your message here">
+                    <input type="submit" value="Send">
+                </div>
+            </form>
+            <div class="terms-container">
+                <input type="checkbox" id="terms" name="terms">
+                <label for="terms">I agree to the terms and conditions</label>
+                <button id="terms-button">Terms and Conditions</button>
+                <div id="terms-text" style="display: none;"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Theme Toggle -->
+    <button id="theme-toggle">🌙 Dark Mode</button>
+
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

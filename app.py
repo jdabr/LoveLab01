@@ -93,7 +93,7 @@ app = Flask(__name__, static_url_path='/static', static_folder='static')
 #running in proudction environment, changes made affect actual website
 #prod = real life, #dev = testing ground 
 
-ENV = 'dev'
+ENV = 'prod'
 
 if ENV == 'dev':
     app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:lovelab1@localhost/LoveLab'
