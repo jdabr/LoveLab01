@@ -1,5 +1,6 @@
 ﻿// -*- coding: utf-8 -*-
 
+// Wait for the HTML document to finish loading before initializing the app
 document.addEventListener('DOMContentLoaded', function () {
     var chatApp = new ChatApp();
     chatApp.init();
@@ -7,23 +8,28 @@ document.addEventListener('DOMContentLoaded', function () {
     new ThemeManager('theme-toggle');
 });
 
+// Manages the dark/light mode toggle and persists the user's preference
 class ThemeManager {
+    // Grabs the toggle button and sets up the theme on load
     constructor(toggleBtnId) {
         this.toggleBtn = document.getElementById(toggleBtnId);
         this.darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
         this.init();
     }
 
+    // Returns the saved theme from localStorage, or falls back to the OS preference
     getPreferredTheme() {
         return localStorage.getItem('theme') ||
             (this.darkMediaQuery.matches ? 'dark' : 'light');
     }
 
+    // Sets the data-theme attribute on the HTML element and updates the button label
     applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
         this.toggleBtn.textContent = theme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
     }
 
+    // Switches between dark and light mode and saves the choice to localStorage
     toggle() {
         const current = document.documentElement.getAttribute('data-theme');
         const next = current === 'dark' ? 'light' : 'dark';
@@ -31,6 +37,7 @@ class ThemeManager {
         this.applyTheme(next);
     }
 
+    // Listens for OS-level theme changes and applies them if no manual preference is saved
     watchSystemTheme() {
         this.darkMediaQuery.addEventListener('change', (e) => {
             if (!localStorage.getItem('theme')) {
@@ -39,6 +46,7 @@ class ThemeManager {
         });
     }
 
+    // Applies the initial theme, attaches the click listener, and starts watching for OS changes
     init() {
         this.applyTheme(this.getPreferredTheme());
         this.toggleBtn.addEventListener('click', () => this.toggle());
@@ -46,7 +54,9 @@ class ThemeManager {
     }
 }
 
+// Controls the main chat interface including messaging, form submission, and the mobile menu
 class ChatApp {
+    // Grabs all necessary DOM elements and initializes the message log
     constructor() {
         this.messageContainer = document.getElementById('message-container');
         this.form = document.getElementById('chat-form');
@@ -59,6 +69,7 @@ class ChatApp {
         this.messageLog = [];
     }
 
+    // Attaches event listeners to the form, terms button, checkbox, and hamburger menu
     init() {
         this.form.addEventListener('submit', (e) => this.handleSubmit(e));
         this.termsButton.addEventListener('click', () => this.toggleTermsText());
@@ -66,6 +77,7 @@ class ChatApp {
         this.hamburgerMenu.addEventListener('click', () => this.toggleMobileMenu());
     }
 
+    // Validates the form, adds the user message to the chat, and sends it to the server
     handleSubmit(e) {
         e.preventDefault();
 
@@ -90,6 +102,7 @@ class ChatApp {
         this.inputMessage.value = '';
     }
 
+    // Fetches and displays the terms and conditions in a modal popup
     toggleTermsText() {
         fetch('static/TermsAndConditions.txt')
             .then(response => response.text())
@@ -121,22 +134,26 @@ class ChatApp {
             });
     }
 
+    // Hides the terms checkbox once the user has agreed
     handleTermsCheckboxChange() {
         if (this.termsCheckbox.checked) {
             this.termsCheckbox.parentElement.style.display = 'none';
         }
     }
 
+    // Creates a new Message instance and renders it in the chat container
     addMessage(role, content) {
         const message = new Message(role, content);
         message.display(this.messageContainer);
     }
 
+    // Displays the animated thinking indicator while waiting for a response
     addThinkingMessage() {
         const thinkingMessage = new ThinkingMessage();
         thinkingMessage.display(this.messageContainer);
     }
 
+    // Removes the thinking indicator once the assistant response has arrived
     removeThinkingMessage() {
         const thinkingMessage = document.getElementById('thinking-message');
         if (thinkingMessage) {
@@ -144,10 +161,12 @@ class ChatApp {
         }
     }
 
+    // Toggles the mobile navigation menu open and closed
     toggleMobileMenu() {
         this.mobileMenu.classList.toggle('active');
     }
 
+    // Sends the user message to the Flask server and displays the assistant response
     sendMessage(message) {
         const server = new Server();
         server.postMessage(message)
@@ -162,12 +181,15 @@ class ChatApp {
     }
 }
 
+// Represents a single chat message and handles rendering it in the chat container
 class Message {
+    // Stores the role (user or assistant) and the message content
     constructor(role, content) {
         this.role = role;
         this.content = content;
     }
 
+    // Creates a styled message div and appends it to the chat container
     display(container) {
         const message = document.createElement('div');
         message.className = 'message';
@@ -179,12 +201,14 @@ class Message {
     }
 }
 
+// Extends Message to display an animated bouncing dots indicator instead of text
 class ThinkingMessage extends Message {
     constructor() {
         super('assistant', '');
         this.id = 'thinking-message';
     }
 
+    // Renders three animated dots in place of a text message
     display(container) {
         const message = document.createElement('div');
         message.className = 'message assistant-message thinking-message';
@@ -199,7 +223,9 @@ class ThinkingMessage extends Message {
     }
 }
 
+// Handles communication with the Flask backend via POST requests
 class Server {
+    // Sends the user message to the server and returns the assistant response
     postMessage(message) {
         return fetch('/', {
             method: 'POST',
