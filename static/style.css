@@ -1,6 +1,7 @@
 ﻿@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
 /* ── CSS Variables ── */
+/* Default dark mode */
 :root {
     --bg-primary: #212121;
     --bg-secondary: #2f2f2f;
@@ -11,11 +12,11 @@
     --accent: #ff6b35;
     --accent-hover: #e55a24;
     --user-bubble: #2f6feb;
-    --user-bubble-hover: #1a5fd4;
     --border-color: #3a3a3a;
     --shadow: rgba(0, 0, 0, 0.3);
 }
 
+/* Light mode */
 [data-theme="light"] {
     --bg-primary: #f9f9f9;
     --bg-secondary: #ffffff;
@@ -428,4 +429,26 @@ p {
         transform: translateY(-6px);
         opacity: 1;
     }
+}
+
+css/* ── About Page ── */
+.about-container {
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.about-container h2 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.about-container p {
+    color: var(--text-secondary);
+    line-height: 1.7;
 }

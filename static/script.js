@@ -1,4 +1,6 @@
-﻿document.addEventListener('DOMContentLoaded', function () {
+﻿// -*- coding: utf-8 -*-
+
+document.addEventListener('DOMContentLoaded', function () {
     var chatApp = new ChatApp();
     chatApp.init();
 

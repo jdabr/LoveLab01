@@ -5,6 +5,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <title>LoveLab</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
     <!-- Anti-flash script: applies theme before page renders -->
     <script>
         (function() {
@@ -22,9 +23,8 @@
         <div class="sidebar-logo">LoveLab</div>
         <nav>
             <ul>
-                <li><a href="#">Examples</a></li>
-                <li><a href="#">About</a></li>
-                <li><a href="#">Contact</a></li>
+                <li><a href="/">Home</a></li>
+                <li><a href="/about">About</a></li>
             </ul>
         </nav>
     </aside>
@@ -40,7 +40,6 @@
     <div class="mobile-menu" id="mobile-menu">
         <div class="mobile-menu-content">
             <ul>
-                <li><a href="#">Examples</a></li>
                 <li><a href="#">About</a></li>
                 <li><a href="#">Contact</a></li>
             </ul>
