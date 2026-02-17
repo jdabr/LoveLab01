@@ -1,41 +1,27 @@
-import datetime 
-#important for using classes that involving using instances of now
-import openai
-#Makes the API call to OPENAPI
-import os
-#can use operating system-dependent functionalities like reading or writing to the file system 
-from flask import Flask, request, render_template, jsonify, session, send_file
 #Flask is the main class for creating a Flask web application 
 #request  contains all the information about a client's TTP request
 #render_template renders an HTML template and fill is it with the provided variables 
 #jsonify converts Python data structures into JSON format 
 #session allows you to stire information specfifc to a user from one request to the next 
 #send_file is used to send the contents of a file to the client 
+
+import datetime 
+import openai
+import os
+from flask import Flask, request, render_template, jsonify, session, send_file
 from flask_sqlalchemy import SQLAlchemy
-#allows us to interact with relational SQL databases 
 from flask_migrate import Migrate
-#simplifies database migation management
-#whatever that means 
 from openai import OpenAI
 
+#sets up the initial state
+#arguement self refers to the instance 
+#api key is the parameter expected when creating the new instance
 
 class ChatAssistant:
     def __init__(self, api_key):
-    #sets up the initial state
-    #arguement self refers to the instance 
-    #api key is the parameter expected when creating the new instance
-        #self.api_key = api_key
-        #this allows for the creation or update of the instance variable: api_key
-        #self.openai = openai
-        #a special method that Python calls when you create a new instance of a class
-        #self.openai.api_key = api_key
-        #Setting an attribute refering to the API key referred to be "self.openai"
-        #self.client = OpenAI(api_key=api_key)
-        self.client = OpenAI(api_key=os.environ["OPENAI_API"])
 
-    #def __init__(self):
-        # Create an OpenAI client instance once
-        #self.client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+
+        self.client = OpenAI(api_key=os.environ["OPENAI_API"])
 
     def get_assistant_response(self, user_message):
         messages = session.get("messages", [])
@@ -48,6 +34,7 @@ Include one follow-up question if the user seems uncertain. Keep responses under
         completion = self.client.responses.create(model="o4-mini", input=messages)
         chat_response = completion.output_text
         messages.append({"role": "assistant", "content": chat_response})
+
         #First it retrieves a list of messages from the variable session not defined here
         #Secondly a list of instructions is marked and the user's messages are appended along with instructions 
         #Thirdly it uses OPENAI's API to create the a response using the model defined
@@ -71,12 +58,11 @@ Include one follow-up question if the user seems uncertain. Keep responses under
 
         #Add second filter for first filter
 
-        filtered_response = filter_check.output_text#[0].message.content
+        filtered_response = filter_check.output_text
 
         if "No" in filtered_response:
             answer = "Hey there! Be sure to ask questions about relationships!"
         elif "As a therapist" in chat_response:
-            #Catch "As a therapist" try another filter
             answer = "Hello! Can you ask or express that in a different way? It may help me understand your concerns better"
         elif "AI" in chat_response:
             answer = "Hello! Can you please give some more details or ask in a different way?"
@@ -84,6 +70,13 @@ Include one follow-up question if the user seems uncertain. Keep responses under
             answer = chat_response
 
         return answer
+
+#__init__ method is the constructor for the class, when a new object is created this is what is called
+#self is a reference to the instance of the class itself
+#db is an argument passed to the constructor
+#self.db = db set an instance variable to the db parameter that way other methods can access elf.db to interact with the database
+#self refers to the instance of the class itself
+#self.db.session.commit() commits the transaction which will save the 'chat_log'
 
 class ChatLogger:
     def __init__(self, db):
@@ -94,18 +87,13 @@ class ChatLogger:
         chat_log = ChatLog(timestamp=timestamp, user_message=user_message, assistant_message=assistant_message,user_ip=user_ip)
         self.db.session.add(chat_log)
         self.db.session.commit()
-#__init__ method is the constructor for the class, when a new object is created this is waht is called
-#self is a reference to the instance of the class itself
-#db is an argument passed to the constructor
-#self.db = db set an instance variable to the db parameter that way other methods can access elf.db to interact with the database
-#self refers to the instance of the class itself
-#self.db.session.commit() commits the transaction which will save the 'chat_log'
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 
-ENV = 'prod'
 #running in proudction environment, changes made affect actual website
 #prod = real life, #dev = testing ground 
+
+ENV = 'dev'
 
 if ENV == 'dev':
     app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:lovelab1@localhost/LoveLab'
