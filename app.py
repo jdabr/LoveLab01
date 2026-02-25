@@ -19,53 +19,56 @@ from openai import OpenAI
 
 class ChatAssistant:
     def __init__(self, api_key):
-
-
         self.client = OpenAI(api_key=os.environ["OPENAI_API"])
 
     def get_assistant_response(self, user_message):
+        # Filter user message before sending to model, saving unnecessary API calls
+        filtered_input = self.apply_filter(user_message)
+        if filtered_input != user_message:
+            return filtered_input
+
+        # Retrieve conversation history from session
         messages = session.get("messages", [])
-        messages.append({"role": "user", "content": user_message + f"""        
-""You are now LoveLab, an AI assistant helping users navigate relationships with empathy and emotional awareness. You respond similar to a relationship therapist. 
-Respond warmly and non-judgmentally with reflective listening, gentle reframing, and practical advice. Avoid clinical labels or harmful guidance.
-Include one follow-up question if the user seems uncertain. Keep responses under 2950 characters."
-"
-        """})
-        completion = self.client.responses.create(model="o4-mini", input=messages)
-        chat_response = completion.output_text
-        messages.append({"role": "assistant", "content": chat_response})
+        messages.append({"role": "user", "content": user_message})
 
-        #First it retrieves a list of messages from the variable session not defined here
-        #Secondly a list of instructions is marked and the user's messages are appended along with instructions 
-        #Thirdly it uses OPENAI's API to create the a response using the model defined
-        #fourthly it extracts the chat response 
-        #lastly the messages are appended to the mesages list with the "assistant" role 
-
-
-        # Apply filtering to assistant's response
-        filtered_response = self.apply_filter(chat_response)
-
-        # Update session messages
-        session["messages"] = messages
-
-        return filtered_response
-
-    def apply_filter(self, chat_response):
-        # Add filter
-        filter_check = self.client.responses.create(model="o4-mini",
-            input=[{"role": "user", "content": """Is the user primarily seeking insight into human relationships or interpersonal dynamics between people? """ + chat_response}]
+        # Send message to model with system prompt as instructions
+        completion = self.client.responses.create(
+            model="o4-mini",
+            instructions="""You are LoveLab, an empathetic AI assistant helping users navigate 
+            personal relationships and interpersonal dynamics. Respond warmly and without judgment, 
+            using reflective listening before offering advice. Gently reframe negative thought patterns 
+            and offer practical, grounded guidance. Ask one thoughtful follow-up question if the user 
+            seems uncertain. Never use clinical labels or harmful guidance. Keep responses under 250 words.""",
+            input=messages
         )
 
-        #Add second filter for first filter
+        chat_response = completion.output_text
 
-        filtered_response = filter_check.output_text
+        # Save updated conversation history to session
+        messages.append({"role": "assistant", "content": chat_response})
+        session["messages"] = messages
 
-        if "No" in filtered_response:
+        return chat_response
+
+    def apply_filter(self, chat_response):
+        if "as a therapist" in chat_response.lower():
+            return "Hello! Can you ask or express that in a different way? It may help me understand your concerns better."
+
+        if "AI" in chat_response or "language model" in chat_response.lower():
+            return "Hello! Can you please give some more details or ask in a different way?"
+
+        filter_check = self.client.responses.create(
+            model="o4-mini",
+            input=[{
+                "role": "user",
+                "content": f"Is the user primarily seeking insight into human relationships or interpersonal dynamics between people? Answer only Yes or No.\n\nMessage: {chat_response}"
+            }]
+        )
+
+        filtered_response = filter_check.output_text.strip()
+
+        if filtered_response.startswith("No"):
             answer = "Hey there! Be sure to ask questions about relationships!"
-        elif "As a therapist" in chat_response:
-            answer = "Hello! Can you ask or express that in a different way? It may help me understand your concerns better"
-        elif "AI" in chat_response:
-            answer = "Hello! Can you please give some more details or ask in a different way?"
         else:
             answer = chat_response
 
@@ -93,7 +96,7 @@ app = Flask(__name__, static_url_path='/static', static_folder='static')
 #running in proudction environment, changes made affect actual website
 #prod = real life, #dev = testing ground 
 
-ENV = 'prod'
+ENV = 'dev'
 
 if ENV == 'dev':
     app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:lovelab1@localhost/LoveLab'
@@ -149,4 +152,4 @@ def about():
     return render_template("about.html")
 
 if __name__ == "__main__":
-    app.run()
+    app.run(debug=True)
