@@ -41,6 +41,7 @@ body {
     background-color: var(--bg-primary);
     color: var(--text-primary);
     height: 100vh;
+    height: 100dvh; /* Fits the visible area on mobile as the address bar shows/hides */
     display: flex;
     overflow: hidden;
     transition: background-color 0.3s ease, color 0.3s ease;
@@ -94,6 +95,7 @@ body {
     display: flex;
     flex-direction: column;
     height: 100vh;
+    height: 100dvh; /* Fits the visible area on mobile as the address bar shows/hides */
     overflow: hidden;
     position: relative;
 }
@@ -210,9 +212,15 @@ body {
     white-space: nowrap;
 }
 
-.input-wrapper input[type="submit"]:hover {
+.input-wrapper input[type="submit"]:hover:not(:disabled) {
     background-color: var(--accent-hover);
     transform: scale(1.03);
+}
+
+/* Shown while waiting for a reply */
+.input-wrapper input[type="submit"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 /* ── Terms ── */
@@ -255,27 +263,130 @@ body {
     backdrop-filter: blur(4px);
 }
 
+/* Header and footer stay put; only the body scrolls */
 .modal-content {
     background-color: var(--bg-secondary);
-    width: 600px;
-    max-height: 80vh;
-    overflow-y: auto;
-    padding: 28px;
+    width: min(600px, calc(100vw - 32px));
+    max-height: 85vh;
+    max-height: 85dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     border-radius: 16px;
     border: 1px solid var(--border-color);
     box-shadow: 0 8px 32px var(--shadow);
     color: var(--text-primary);
 }
 
-.close-button {
-    float: right;
-    cursor: pointer;
-    font-size: 22px;
-    color: var(--text-secondary);
-    transition: color 0.2s ease;
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 20px 16px 28px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
 
-.close-button:hover { color: var(--accent); }
+.modal-header h2 {
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.close-button {
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    width: 40px;
+    height: 40px;
+    cursor: pointer;
+    font-size: 26px;
+    line-height: 1;
+    color: var(--text-secondary);
+    transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.close-button:hover {
+    color: var(--accent);
+    background-color: var(--bg-primary);
+}
+
+.modal-body {
+    padding: 20px 28px;
+    overflow-y: auto;
+    line-height: 1.6;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
+}
+
+.modal-body h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.modal-body h4 {
+    font-size: 0.98rem;
+    font-weight: 600;
+    margin: 22px 0 8px;
+}
+
+.modal-body .terms-updated {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+}
+
+.modal-body ul {
+    margin: 0 0 10px 20px;
+}
+
+.modal-body li {
+    margin-bottom: 4px;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px 20px;
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.modal-button {
+    border-radius: 10px;
+    padding: 9px 18px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.modal-button.primary {
+    background-color: var(--accent);
+    border: 1px solid var(--accent);
+    color: #fff;
+}
+
+.modal-button.primary:hover { background-color: var(--accent-hover); }
+
+.modal-button.secondary {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+.modal-button.secondary:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.close-button:focus-visible,
+.modal-button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
 
 p {
     margin-bottom: 10px;

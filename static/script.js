@@ -69,47 +69,155 @@ class MobileMenuManager {
     }
 }
 
-// Handles fetching and displaying the terms and conditions modal
+// Handles the terms and conditions agreement and modal
 class TermsManager {
+    // Change TERMS_VERSION whenever TermsAndConditions.txt is updated so visitors are asked to agree again
+    static TERMS_VERSION = '2026-11-06';
+    static STORAGE_KEY = 'termsAccepted';
+
     constructor(termsButtonId, termsCheckboxId) {
         this.termsButton = document.getElementById(termsButtonId);
         this.termsCheckbox = document.getElementById(termsCheckboxId);
         this.termsLabel = document.querySelector('label[for="terms"]');
+        this.modal = null;
+        this.onAgree = null;
+        this.onKeydown = (e) => { if (e.key === 'Escape') this.closeModal(); };
     }
 
-    // Fetches terms content and renders it inside a modal popup
-    showModal() {
-        fetch('static/TermsAndConditions.txt')
-            .then(response => response.text())
-            .then(content => {
-                const modal = document.createElement('div');
-                modal.className = 'modal';
+    // Opens the terms in a modal. onAgree (optional) runs after the visitor clicks "I agree".
+    showModal(onAgree = null) {
+        if (this.modal) return;  // Already open
+        this.onAgree = onAgree;
+        this.previousFocus = document.activeElement;
 
-                const modalContent = document.createElement('div');
-                modalContent.className = 'modal-content';
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        // Clicking the dimmed backdrop (outside the box) closes the modal
+        modal.addEventListener('click', (e) => { if (e.target === modal) this.closeModal(); });
 
-                const closeButton = document.createElement('span');
-                closeButton.className = 'close-button';
-                closeButton.innerHTML = '&times;';
-                closeButton.addEventListener('click', () => modal.remove());
+        const content = document.createElement('div');
+        content.className = 'modal-content';
+        content.setAttribute('role', 'dialog');
+        content.setAttribute('aria-modal', 'true');
+        content.setAttribute('aria-labelledby', 'terms-title');
 
-                const termsText = document.createElement('p');
-                termsText.innerText = content;
+        const header = document.createElement('div');
+        header.className = 'modal-header';
+        const title = document.createElement('h2');
+        title.id = 'terms-title';
+        title.textContent = 'Terms and Conditions';
+        const closeButton = document.createElement('button');
+        closeButton.type = 'button';
+        closeButton.className = 'close-button';
+        closeButton.setAttribute('aria-label', 'Close');
+        closeButton.textContent = '×';
+        closeButton.addEventListener('click', () => this.closeModal());
+        header.append(title, closeButton);
 
-                modalContent.appendChild(closeButton);
-                modalContent.appendChild(termsText);
-                modal.appendChild(modalContent);
-                document.body.appendChild(modal);
-            })
-            .catch(error => console.error('Error loading terms:', error));
-    }
+        const body = document.createElement('div');
+        body.className = 'modal-body';
+        body.textContent = 'Loading…';
 
-    // Hides the checkbox and label once the user agrees
-    handleAgreement() {
-        if (this.termsCheckbox.checked) {
-            this.termsCheckbox.style.display = 'none';
-            if (this.termsLabel) this.termsLabel.style.display = 'none';
+        const footer = document.createElement('div');
+        footer.className = 'modal-footer';
+        const closeFooterButton = document.createElement('button');
+        closeFooterButton.type = 'button';
+        closeFooterButton.className = 'modal-button secondary';
+        closeFooterButton.textContent = 'Close';
+        closeFooterButton.addEventListener('click', () => this.closeModal());
+        footer.appendChild(closeFooterButton);
+        if (!this.isAgreed()) {
+            const agreeButton = document.createElement('button');
+            agreeButton.type = 'button';
+            agreeButton.className = 'modal-button primary';
+            agreeButton.textContent = 'I agree';
+            agreeButton.addEventListener('click', () => this.agree());
+            footer.appendChild(agreeButton);
         }
+
+        content.append(header, body, footer);
+        modal.appendChild(content);
+        document.body.appendChild(modal);
+        document.addEventListener('keydown', this.onKeydown);
+        this.modal = modal;
+        (footer.querySelector('.primary') || closeButton).focus();
+
+        fetch('/static/TermsAndConditions.txt')
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.text();
+            })
+            .then(text => this.renderTerms(body, text))
+            .catch(error => {
+                console.error('Error loading terms:', error);
+                body.textContent = 'Sorry, the terms could not be loaded. Please try again.';
+            });
+    }
+
+    // Turns the plain-text terms into headings, paragraphs and bullet lists (using textContent only, never HTML)
+    renderTerms(container, text) {
+        container.textContent = '';
+        let list = null;
+        text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).forEach((line, index) => {
+            let el;
+            if (line.startsWith('- ')) {
+                if (!list) {
+                    list = document.createElement('ul');
+                    container.appendChild(list);
+                }
+                el = document.createElement('li');
+                el.textContent = line.slice(2);
+                list.appendChild(el);
+                return;
+            }
+            list = null;
+            if (index === 0) {
+                el = document.createElement('h3');  // Document title
+            } else if (/^\d+\.\s/.test(line)) {
+                el = document.createElement('h4');  // Numbered section heading
+            } else {
+                el = document.createElement('p');
+                if (/^Last updated:/.test(line)) el.className = 'terms-updated';
+            }
+            el.textContent = line;
+            container.appendChild(el);
+        });
+    }
+
+    closeModal() {
+        if (!this.modal) return;
+        this.modal.remove();
+        this.modal = null;
+        this.onAgree = null;
+        document.removeEventListener('keydown', this.onKeydown);
+        this.previousFocus?.focus?.();
+    }
+
+    agree() {
+        const callback = this.onAgree;
+        this.termsCheckbox.checked = true;
+        this.handleAgreement();
+        this.closeModal();
+        if (callback) callback();
+    }
+
+    // Hides the checkbox and label once the user agrees, and remembers it on this device
+    handleAgreement() {
+        if (!this.termsCheckbox.checked) return;
+        this.termsCheckbox.style.display = 'none';
+        if (this.termsLabel) this.termsLabel.style.display = 'none';
+        try {
+            localStorage.setItem(TermsManager.STORAGE_KEY, TermsManager.TERMS_VERSION);
+        } catch (e) { /* Storage unavailable (e.g. private mode): agreement lasts for this page only */ }
+    }
+
+    restoreAgreement() {
+        try {
+            if (localStorage.getItem(TermsManager.STORAGE_KEY) === TermsManager.TERMS_VERSION) {
+                this.termsCheckbox.checked = true;
+                this.handleAgreement();
+            }
+        } catch (e) { /* Storage unavailable */ }
     }
 
     isAgreed() {
@@ -119,6 +227,7 @@ class TermsManager {
     init() {
         this.termsButton.addEventListener('click', () => this.showModal());
         this.termsCheckbox.addEventListener('change', () => this.handleAgreement());
+        this.restoreAgreement();
     }
 }
 
@@ -183,25 +292,34 @@ class ChatApp {
         this.form = document.getElementById('chat-form');
         this.inputMessage = document.getElementById('input-message');
         this.termsManager = new TermsManager('terms-button', 'terms');
+        this.sendButton = this.form.querySelector('[type="submit"]');
         this.server = new Server();
         this.messageLog = [];
+        this.isWaiting = false;
     }
 
     handleSubmit(e) {
         e.preventDefault();
+        this.send();
+    }
 
-        if (!this.termsManager.isAgreed()) {
-            alert('Please agree to the terms and conditions to continue using the app.');
-            return;
-        }
+    send() {
+        if (this.isWaiting) return;  // One message at a time
 
         const userMessage = this.inputMessage.value.trim();
         if (!userMessage) return;
+
+        // Instead of blocking with an alert, show the terms; agreeing sends the message
+        if (!this.termsManager.isAgreed()) {
+            this.termsManager.showModal(() => this.send());
+            return;
+        }
 
         this.addMessage('user', userMessage);
         this.messageLog.push({ role: 'user', content: userMessage });
         this.showThinking();
         this.inputMessage.value = '';
+        this.setWaiting(true);
 
         this.server.postMessage(userMessage)
             .then(response => {
@@ -214,7 +332,17 @@ class ChatApp {
                 console.error('Error:', error);
                 this.hideThinking();
                 this.addMessage('assistant', "Sorry, something went wrong on our end. Please try again in a moment.");
+            })
+            .finally(() => {
+                this.setWaiting(false);
+                this.inputMessage.focus();
             });
+    }
+
+    // Disables Send while a reply is pending so messages can't be double-sent; typing stays allowed
+    setWaiting(waiting) {
+        this.isWaiting = waiting;
+        if (this.sendButton) this.sendButton.disabled = waiting;
     }
 
     addMessage(role, content) {
@@ -232,6 +360,8 @@ class ChatApp {
     init() {
         this.form.addEventListener('submit', (e) => this.handleSubmit(e));
         this.termsManager.init();
+        // Focus the message box on desktop only; on phones it would pop the keyboard open on page load
+        if (window.matchMedia('(pointer: fine)').matches) this.inputMessage.focus();
     }
 }
 
