@@ -130,8 +130,13 @@ class Server {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message }),
         })
-            .then(response => response.json())
-            .then(data => data.message);
+            .then(response => response.json()
+                // Non-JSON responses (e.g. an HTML error page) become a readable error
+                .catch(() => { throw new Error(`Server error (${response.status})`); }))
+            .then(data => {
+                if (!data || typeof data.message !== 'string') throw new Error('Invalid server response');
+                return data.message;
+            });
     }
 }
 
@@ -204,7 +209,12 @@ class ChatApp {
                 this.addMessage('assistant', response);
                 this.messageLog.push({ role: 'assistant', content: response });
             })
-            .catch(error => console.error('Error:', error));
+            .catch(error => {
+                // Always clear the typing indicator so the chat never gets stuck
+                console.error('Error:', error);
+                this.hideThinking();
+                this.addMessage('assistant', "Sorry, something went wrong on our end. Please try again in a moment.");
+            });
     }
 
     addMessage(role, content) {

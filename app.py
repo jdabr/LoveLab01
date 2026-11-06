@@ -5,7 +5,7 @@
 #session allows you to stire information specfifc to a user from one request to the next 
 #send_file is used to send the contents of a file to the client 
 
-import datetime 
+import datetime
 import openai
 import os
 from flask import Flask, request, render_template, jsonify, session, send_file
@@ -16,6 +16,10 @@ from dotenv import load_dotenv
 
 # Load variables from a local .env file (no-op in production where it doesn't exist)
 load_dotenv()
+
+# OpenAI model used for both the topic filter and the reply.
+# o4-mini was shut down by OpenAI on 2026-10-23; override with the OPENAI_MODEL env var when models are retired.
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-terra")
 
 #sets up the initial state
 #arguement self refers to the instance 
@@ -37,7 +41,7 @@ class ChatAssistant:
 
         # Send message to model with system prompt as instructions
         completion = self.client.responses.create(
-            model="o4-mini",
+            model=OPENAI_MODEL,
             instructions="""You are LoveLab, an empathetic AI assistant helping users navigate 
             personal relationships and interpersonal dynamics. Respond warmly and without judgment, 
             using reflective listening before offering advice. Gently reframe negative thought patterns 
@@ -62,7 +66,7 @@ class ChatAssistant:
             return "Hello! Can you please give some more details or ask in a different way?"
 
         filter_check = self.client.responses.create(
-            model="o4-mini",
+            model=OPENAI_MODEL,
             input=[{
                 "role": "user",
                 "content": f"Is the user primarily seeking insight into human relationships or interpersonal dynamics between people? Answer only Yes or No.\n\nMessage: {chat_response}"
@@ -140,9 +144,22 @@ def home():
 
     if request.method == "POST":
         user_message = request.json["message"]
-        assistant_message = chat_assistant.get_assistant_response(user_message)
+        try:
+            assistant_message = chat_assistant.get_assistant_response(user_message)
+        except Exception:
+            # Log the full error (visible in Heroku logs) and give the user a friendly reply instead of a 500
+            app.logger.exception("OpenAI request failed")
+            return jsonify({"message": "Sorry, I'm having trouble responding right now. Please try again in a moment."}), 502
+
         user_ip = request.environ.get("HTTP_X_REAL_IP", request.remote_addr)
-        chat_logger.log_message(user_message, assistant_message,user_ip)
+        try:
+            # Truncate to the column sizes so long messages don't fail the insert
+            chat_logger.log_message(user_message[:255], assistant_message[:3000], user_ip)
+        except Exception:
+            # A logging failure shouldn't stop the user from getting their reply
+            db.session.rollback()
+            app.logger.exception("Failed to log chat message")
+
         return jsonify({"message": assistant_message})
 
     # Add initial message to the session
