@@ -169,8 +169,17 @@ if ENV == 'dev':
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
         'DATABASE_URL', 'postgresql://postgres:lovelab1@localhost/LoveLab')
 else:
+    # PG_URI is a manually set config var ("user:password@host:port/dbname").
+    # If it's removed, fall back to DATABASE_URL, which Heroku Postgres sets and keeps up to date
+    # automatically (including after credential rotation).
     db_uri = os.environ.get('PG_URI')
-    app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{db_uri}"
+    if db_uri:
+        app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{db_uri}"
+    elif os.environ.get('DATABASE_URL'):
+        # Heroku uses the "postgres://" scheme, which SQLAlchemy no longer accepts
+        app.config['SQLALCHEMY_DATABASE_URI'] = re.sub(r'^postgres://', 'postgresql://', os.environ['DATABASE_URL'])
+    else:
+        raise RuntimeError("No database configured: set DATABASE_URL (or PG_URI)")
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # The secret key signs the session cookie. Never fall back to a known value: anyone who knows it can
@@ -201,6 +210,13 @@ limiter = Limiter(
     strategy="moving-window",
     headers_enabled=True,  # Sends Retry-After so clients know when to try again
 )
+
+@app.after_request
+def set_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'  # Browsers must respect declared content types
+    response.headers['X-Frame-Options'] = 'DENY'  # Block embedding the site in other pages (clickjacking)
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    return response
 
 @app.errorhandler(429)
 def rate_limited(e):
