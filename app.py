@@ -211,7 +211,8 @@ class ChatLogger:
 
     def log_message(self, user_message, assistant_message, ip_address):
         chat_log = ChatLog(
-            timestamp=datetime.datetime.now(),
+            # Stored in UTC (without timezone info), matching the UTC day used for visitor IDs
+            timestamp=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
             # Scrub first, then truncate to the column sizes
             user_message=scrub_contact_details(user_message)[:255],
             assistant_message=scrub_contact_details(assistant_message)[:3000],
@@ -267,19 +268,47 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024  # Reject oversized request bodies
 CHAT_RATE_LIMIT = os.environ.get("CHAT_RATE_LIMIT", "8 per minute;60 per hour;150 per day")
 GLOBAL_CHAT_RATE_LIMIT = os.environ.get("GLOBAL_CHAT_RATE_LIMIT", "3000 per day")
 
-# "memory://" keeps counters inside each app process, so limits are per worker and reset on restart.
-# For exact limits across workers/dynos, point RATELIMIT_STORAGE_URI at Redis (e.g. redis://...)
-# and add the `redis` package to requirements.txt.
+# Where rate-limit counters are kept:
+# - With Redis (Heroku Key-Value Store sets REDIS_URL automatically), counts are shared by every
+#   worker and survive restarts, so the limits are exact.
+# - Without it, "memory://" keeps counts inside each worker process: limits are approximate
+#   (multiplied by the number of workers) and reset on restart.
+# RATELIMIT_STORAGE_URI overrides both.
+RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI") or os.environ.get("REDIS_URL") or "memory://"
+RATELIMIT_STORAGE_OPTIONS = {}
+if RATELIMIT_STORAGE_URI.startswith("rediss://"):
+    # Heroku Key-Value Store uses TLS with a self-signed certificate
+    RATELIMIT_STORAGE_OPTIONS["ssl_cert_reqs"] = "none"
+
 limiter = Limiter(
     get_remote_address,
     app=app,
-    storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
+    storage_uri=RATELIMIT_STORAGE_URI,
+    storage_options=RATELIMIT_STORAGE_OPTIONS,
     strategy="moving-window",
     headers_enabled=True,  # Sends Retry-After so clients know when to try again
+    # If Redis is unreachable, keep serving with per-worker in-memory limits instead of failing requests
+    in_memory_fallback_enabled=True,
+    swallow_errors=True,
 )
+
+# Content-Security-Policy: the browser may only load scripts, styles and data from this site itself,
+# so even if an injection bug ever let someone insert a <script> tag, the browser would refuse to run it.
+CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
 
 @app.after_request
 def set_security_headers(response):
+    response.headers['Content-Security-Policy'] = CONTENT_SECURITY_POLICY
     response.headers['X-Content-Type-Options'] = 'nosniff'  # Browsers must respect declared content types
     response.headers['X-Frame-Options'] = 'DENY'  # Block embedding the site in other pages (clickjacking)
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'

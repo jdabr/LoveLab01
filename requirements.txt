@@ -8,3 +8,4 @@ python-dotenv>=1.0.0
 psycopg2-binary>=2.9.9
 SQLAlchemy>=2.0.20,<2.1
 Flask-Limiter>=3.8
+redis>=5.0

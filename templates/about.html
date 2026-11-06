@@ -1,35 +1,9 @@
-﻿<!DOCTYPE html>
-<html>
-<head>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <title>LoveLab - About</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta charset="UTF-8">
-    <script>
-        (function() {
-            const saved = localStorage.getItem('theme');
-            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            const theme = saved || (prefersDark ? 'dark' : 'light');
-            document.documentElement.setAttribute('data-theme', theme);
-        })();
-    </script>
-</head>
-<body>
+﻿{% extends "base.html" %}
 
-        <aside class="sidebar">
-        <div class="sidebar-logo">LoveLab</div>
-        <nav>
-            <ul>
-                <li><a href="/">Home</a></li>
-                <li><a href="/about">About</a></li>
-            </ul>
-        </nav>
-    </aside>
+{% block title %}LoveLab - About{% endblock %}
+{% block header %}About{% endblock %}
 
-    <div class="main-container">
-        <div class="chat-header">About</div>
-
+{% block content %}
         <div class="about-container">
             <h2>What is LoveLab?</h2>
             <p>LoveLab is a conversational AI assistant designed to help you...</p>
@@ -40,10 +14,4 @@
             <h2>Contact</h2>
             <p>Have questions? Reach out at Hydrobusiness@outlook.com</p>
         </div>
-    </div>
-
-    <button id="theme-toggle">🌙 Dark Mode</button>
-
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
-</body>
-</html>
+{% endblock %}

@@ -65,6 +65,10 @@ class MobileMenuManager {
     init() {
         if (!this.isAvailable()) return;
         this.hamburger.addEventListener('click', (e) => this.toggle(e));
+        // Keyboard support: Enter or Space opens/closes the menu
+        this.hamburger.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.toggle(e); }
+        });
         document.addEventListener('click', (e) => this.closeIfOutside(e));
     }
 }

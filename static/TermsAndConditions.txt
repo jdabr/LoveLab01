@@ -57,7 +57,6 @@ How it is used. We use stored conversations to operate LoveLab, troubleshoot pro
 Who it is shared with.
 - OpenAI: your message and the recent messages in your conversation are sent to OpenAI to generate a response. Our server sends them, so OpenAI does not receive your IP address. OpenAI processes this data under its own API terms and policies (https://openai.com/policies/).
 - Hosting providers: LoveLab and its database run on Heroku, a cloud hosting provider. As part of operating the service, Heroku may briefly record technical information such as IP addresses in its own system logs.
-- Google Fonts: pages load a font from Google, which receives your IP address when it does.
 - We may disclose information if required by law.
 We do not sell your information or use it for advertising.
 

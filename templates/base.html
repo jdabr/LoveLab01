@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}LoveLab{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <!-- Applies the saved theme before the page renders, so there's no flash of the wrong theme -->
+    <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <!-- Sidebar (desktop) -->
+    <aside class="sidebar">
+        <div class="sidebar-logo">LoveLab</div>
+        <nav>
+            <ul>
+                <li><a href="/">Home</a></li>
+                <li><a href="/about">About</a></li>
+            </ul>
+        </nav>
+    </aside>
+
+    <!-- Menu (mobile) -->
+    <div class="mobile-menu" id="mobile-menu">
+        <div class="mobile-menu-content">
+            <ul>
+                <li><a href="/">Home</a></li>
+                <li><a href="/about">About</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="chat-header">
+            <div class="hamburger" id="hamburger-menu" role="button" aria-label="Menu" tabindex="0">
+                <div class="hamburger-line"></div>
+                <div class="hamburger-line"></div>
+                <div class="hamburger-line"></div>
+            </div>
+            {% block header %}LoveLab{% endblock %}
+        </div>
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <button id="theme-toggle">🌙 Dark Mode</button>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

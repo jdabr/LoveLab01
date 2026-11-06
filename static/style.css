@@ -1,4 +1,3 @@
-﻿@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
 /* ── CSS Variables ── */
 :root {
@@ -193,7 +192,7 @@ body {
     border: none;
     outline: none;
     color: var(--text-primary);
-    font-family: 'Inter', sans-serif;
+    font-family: inherit;
     font-size: 0.95rem;
 }
 
