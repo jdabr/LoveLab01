@@ -6,6 +6,8 @@
 #send_file is used to send the contents of a file to the client 
 
 import datetime
+import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -17,6 +19,8 @@ from flask_migrate import Migrate
 from openai import OpenAI
 from dotenv import load_dotenv
 from werkzeug.middleware.proxy_fix import ProxyFix
+from sqlalchemy.exc import IntegrityError
+from privacy import scrub_contact_details
 
 # Load variables from a local .env file (no-op in production where it doesn't exist)
 load_dotenv()
@@ -144,13 +148,53 @@ class ChatAssistant:
 #self refers to the instance of the class itself
 #self.db.session.commit() commits the transaction which will save the 'chat_log'
 
+#Logs are kept anonymous:
+# - IP addresses are never stored. Each visitor gets a "visitor ID" made by HMAC-hashing their IP with a
+#   random secret that changes every day (UTC). Messages from the same visitor on the same day share an ID.
+# - Each day's secret is deleted once a new day starts, after which nobody (including us) can link that
+#   day's IDs back to an IP address or to the same visitor on another day.
+# - Emails, phone numbers, links and @handles are replaced with placeholders before saving.
+
 class ChatLogger:
     def __init__(self, db):
         self.db = db
+        self._cached_salt = (None, None)  # (day, secret) so the DB is only asked once per day per process
 
-    def log_message(self, user_message, assistant_message, user_ip):
-        timestamp = datetime.datetime.now()
-        chat_log = ChatLog(timestamp=timestamp, user_message=user_message, assistant_message=assistant_message,user_ip=user_ip)
+    def _daily_secret(self):
+        today = datetime.datetime.now(datetime.timezone.utc).date()
+        cached_day, cached_secret = self._cached_salt
+        if cached_day == today:
+            return cached_secret
+
+        row = self.db.session.get(VisitorSalt, today)
+        if row is None:
+            self.db.session.add(VisitorSalt(day=today, salt=secrets.token_hex(32)))
+            try:
+                self.db.session.commit()
+            except IntegrityError:
+                # Another worker created today's secret at the same moment; use theirs
+                self.db.session.rollback()
+            row = self.db.session.get(VisitorSalt, today)
+
+        # Destroy earlier days' secrets so past visitor IDs can never be traced back
+        VisitorSalt.query.filter(VisitorSalt.day < today).delete()
+        self.db.session.commit()
+
+        self._cached_salt = (today, row.salt)
+        return row.salt
+
+    def visitor_id(self, ip_address):
+        digest = hmac.new(self._daily_secret().encode(), (ip_address or "").encode(), hashlib.sha256)
+        return digest.hexdigest()[:16]
+
+    def log_message(self, user_message, assistant_message, ip_address):
+        chat_log = ChatLog(
+            timestamp=datetime.datetime.now(),
+            # Scrub first, then truncate to the column sizes
+            user_message=scrub_contact_details(user_message)[:255],
+            assistant_message=scrub_contact_details(assistant_message)[:3000],
+            visitor_id=self.visitor_id(ip_address),
+        )
         self.db.session.add(chat_log)
         self.db.session.commit()
 
@@ -231,7 +275,13 @@ class ChatLog(db.Model):
     timestamp = db.Column(db.DateTime, nullable=False)
     user_message = db.Column(db.String(255), nullable=False)
     assistant_message = db.Column(db.String(3000), nullable=False)
-    user_ip = db.Column(db.String(45))
+    visitor_id = db.Column(db.String(16))  # Anonymous per-day ID, never the IP address (see ChatLogger)
+
+class VisitorSalt(db.Model):
+    # Holds only the current day's secret; older rows are deleted automatically
+    __tablename__ = 'visitor_salt'
+    day = db.Column(db.Date, primary_key=True)
+    salt = db.Column(db.String(64), nullable=False)
 
 
 if not os.environ.get("OPENAI_API"):
@@ -267,10 +317,9 @@ def home():
             app.logger.exception("OpenAI request failed")
             return jsonify({"message": "Sorry, I'm having trouble responding right now. Please try again in a moment."}), 502
 
-        user_ip = request.remote_addr  # Real client IP via ProxyFix
         try:
-            # Truncate to the column sizes so long messages don't fail the insert
-            chat_logger.log_message(user_message[:255], assistant_message[:3000], user_ip)
+            # The IP (real client IP via ProxyFix) is only used to derive the anonymous visitor ID; it isn't stored
+            chat_logger.log_message(user_message, assistant_message, request.remote_addr)
         except Exception:
             # A logging failure shouldn't stop the user from getting their reply
             db.session.rollback()

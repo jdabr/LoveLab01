@@ -42,27 +42,30 @@ We may block or limit access for anyone who violates these Terms or misuses the 
 
 5. Privacy: what we collect and how it is used
 
-What we collect. Each time you send a message, we store:
-- your message (up to the first 255 characters);
-- LoveLab's response;
-- the date and time; and
-- your IP address.
-We do not ask for your name, email address or other account details.
+LoveLab is designed to be anonymous. There are no accounts, and we never ask for your name, email address or phone number.
 
-How it is used. We use this information to operate LoveLab, troubleshoot problems, prevent abuse (including enforcing message limits), and improve the service.
+What we store. Each time you send a message, we store:
+- your message (up to the first 255 characters) and LoveLab's response;
+- the date and time; and
+- an anonymous visitor ID.
+Before anything is stored, email addresses, phone numbers and other long numbers, links and social media handles are automatically replaced with placeholders such as [email] or [number].
+
+What we do not store. We do not store your IP address. It is used only briefly, in memory, to enforce message limits and to create the anonymous visitor ID. The visitor ID is generated using a secret that changes every day. It lets us see which messages were sent by the same visitor on the same day, but once the day is over the secret is permanently deleted, and the ID can no longer be linked to your IP address, to you, or to your visits on other days.
+
+How it is used. We use stored conversations to operate LoveLab, troubleshoot problems, prevent abuse and improve the service.
 
 Who it is shared with.
-- OpenAI: your message and the recent messages in your conversation are sent to OpenAI to generate a response. OpenAI processes this data under its own API terms and policies (https://openai.com/policies/).
-- Hosting providers: LoveLab and its database run on Heroku, a cloud hosting provider.
+- OpenAI: your message and the recent messages in your conversation are sent to OpenAI to generate a response. Our server sends them, so OpenAI does not receive your IP address. OpenAI processes this data under its own API terms and policies (https://openai.com/policies/).
+- Hosting providers: LoveLab and its database run on Heroku, a cloud hosting provider. As part of operating the service, Heroku may briefly record technical information such as IP addresses in its own system logs.
 - Google Fonts: pages load a font from Google, which receives your IP address when it does.
 - We may disclose information if required by law.
 We do not sell your information or use it for advertising.
 
 Cookies and browser storage. LoveLab uses one session cookie to hold your current conversation while the page is open. It also saves your light/dark mode preference in your browser. We do not use advertising or tracking cookies.
 
-How long we keep it. Chat logs are currently kept without a fixed deletion date. We may delete them at any time.
+How long we keep it. Stored conversations are currently kept without a fixed deletion date. We may delete them at any time.
 
-Your choices. Please do not include information that could identify you or others, such as full names, addresses, phone numbers or account details. To ask about or request deletion of your data, email us at the address below with the approximate date and time of your conversation so we can locate it.
+Access and deletion requests. Because stored conversations are anonymous, we cannot tell which conversations belong to you, so we are unable to locate, provide or delete a specific person's conversations. Please do not include information that could identify you or others, such as full names, addresses or account details. Automatic filtering catches common contact details but cannot remove everything.
 
 
 6. Your content
@@ -93,4 +96,4 @@ If any part of these Terms is found unenforceable, the rest remains in effect. T
 
 10. Contact
 
-Questions, concerns or data requests: Hydrobusiness@outlook.com
+Questions or concerns: Hydrobusiness@outlook.com
