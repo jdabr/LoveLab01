@@ -7,8 +7,11 @@
 
 import datetime
 import os
+import re
 import secrets
 from flask import Flask, request, render_template, jsonify, session
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from openai import OpenAI
@@ -60,6 +63,12 @@ Respond with exactly one English word: YES or NO."""
 
 OFF_TOPIC_REPLY = "Hey there! Be sure to ask questions about relationships!"
 
+# Matches "AI" / "A.I." / "AIs" only as a standalone word, so words that merely contain the
+# letters (e.g. "SAID", "MAIL", "PAIN") aren't blocked. Case-sensitive on purpose: lowercase
+# "ai" is an everyday word in other languages (Italian "ai" = "to the", Portuguese "ai" = "oh").
+# Off-topic questions about the bot written as "ai" are still caught by the topic filter.
+AI_MENTION_PATTERN = re.compile(r"\bA\.?I\.?s?\b")
+
 #sets up the initial state
 #arguement self refers to the instance
 #api key is the parameter expected when creating the new instance
@@ -104,7 +113,10 @@ class ChatAssistant:
         if "as a therapist" in chat_response.lower():
             return "Hello! Can you ask or express that in a different way? It may help me understand your concerns better."
 
-        if "AI" in chat_response or "language model" in chat_response.lower():
+        lowered = chat_response.lower()
+        if (AI_MENTION_PATTERN.search(chat_response)
+                or "language model" in lowered
+                or "artificial intelligence" in lowered):
             return "Hello! Can you please give some more details or ask in a different way?"
 
         # The classifier's rules go in `instructions`, and the user's text goes in as a separate
@@ -171,6 +183,29 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = ENV != 'dev'  # HTTPS-only cookies in production
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024  # Reject oversized request bodies
+
+# ── Rate limiting ──
+# Protects the OpenAI bill from abuse. Limits apply only to sending chat messages (POST /).
+# Per-visitor limits are keyed on the real client IP (via ProxyFix above); the global limit caps
+# total messages across all visitors. All limits can be tuned with config vars without a code change.
+CHAT_RATE_LIMIT = os.environ.get("CHAT_RATE_LIMIT", "8 per minute;60 per hour;150 per day")
+GLOBAL_CHAT_RATE_LIMIT = os.environ.get("GLOBAL_CHAT_RATE_LIMIT", "3000 per day")
+
+# "memory://" keeps counters inside each app process, so limits are per worker and reset on restart.
+# For exact limits across workers/dynos, point RATELIMIT_STORAGE_URI at Redis (e.g. redis://...)
+# and add the `redis` package to requirements.txt.
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
+    strategy="moving-window",
+    headers_enabled=True,  # Sends Retry-After so clients know when to try again
+)
+
+@app.errorhandler(429)
+def rate_limited(e):
+    # JSON so the chat window shows a readable message instead of hanging
+    return jsonify({"message": "You're sending messages a little too quickly. Please wait a moment and try again."}), 429
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 
@@ -189,6 +224,8 @@ chat_assistant = ChatAssistant(os.environ["OPENAI_API"]) #coming from environmen
 chat_logger = ChatLogger(db)
 
 @app.route("/", methods=["GET", "POST"])
+@limiter.limit(CHAT_RATE_LIMIT, methods=["POST"])
+@limiter.shared_limit(GLOBAL_CHAT_RATE_LIMIT, scope="global-chat", key_func=lambda: "all-visitors", methods=["POST"])
 def home():
     if request.method == "GET":
         # Clear previous messages when the page is refreshed
