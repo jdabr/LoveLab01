@@ -76,7 +76,7 @@ class MobileMenuManager {
 // Handles the terms and conditions agreement and modal
 class TermsManager {
     // Change TERMS_VERSION whenever TermsAndConditions.txt is updated so visitors are asked to agree again
-    static TERMS_VERSION = '2026-11-06';
+    static TERMS_VERSION = '2026-11-06.2';
     static STORAGE_KEY = 'termsAccepted';
 
     constructor(termsButtonId, termsCheckboxId) {
@@ -134,7 +134,7 @@ class TermsManager {
             const agreeButton = document.createElement('button');
             agreeButton.type = 'button';
             agreeButton.className = 'modal-button primary';
-            agreeButton.textContent = 'I agree';
+            agreeButton.textContent = "I'm 18+ and agree";
             agreeButton.addEventListener('click', () => this.agree());
             footer.appendChild(agreeButton);
         }
