@@ -12,6 +12,10 @@ from flask import Flask, request, render_template, jsonify, session, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from openai import OpenAI
+from dotenv import load_dotenv
+
+# Load variables from a local .env file (no-op in production where it doesn't exist)
+load_dotenv()
 
 #sets up the initial state
 #arguement self refers to the instance 
@@ -19,7 +23,7 @@ from openai import OpenAI
 
 class ChatAssistant:
     def __init__(self, api_key):
-        self.client = OpenAI(api_key=os.environ["OPENAI_API"])
+        self.client = OpenAI(api_key=api_key)
 
     def get_assistant_response(self, user_message):
         # Filter user message before sending to model, saving unnecessary API calls
@@ -96,16 +100,18 @@ app = Flask(__name__, static_url_path='/static', static_folder='static')
 #running in proudction environment, changes made affect actual website
 #prod = real life, #dev = testing ground 
 
-ENV = 'dev'
+#set LOVELAB_ENV=dev in your local .env file; defaults to prod so deployments are unaffected
+ENV = os.environ.get('LOVELAB_ENV', 'prod')
 
 if ENV == 'dev':
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:lovelab1@localhost/LoveLab'
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+        'DATABASE_URL', 'postgresql://postgres:lovelab1@localhost/LoveLab')
 else:
     db_uri = os.environ.get('PG_URI')
     app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{db_uri}"
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.secret_key = 'your_secret_key'  # Set a secret key for session
+app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key')  # Set a secret key for session
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 
@@ -117,7 +123,10 @@ class ChatLog(db.Model):
     user_ip = db.Column(db.String(45))
 
 
-chat_assistant = ChatAssistant(os.environ["OPENAI_API"]) #coming from environment variables 
+if not os.environ.get("OPENAI_API"):
+    raise RuntimeError("OPENAI_API environment variable is not set (add it to your .env file for local development)")
+
+chat_assistant = ChatAssistant(os.environ["OPENAI_API"]) #coming from environment variables
 chat_logger = ChatLogger(db)
 
 @app.route("/", methods=["GET", "POST"])
