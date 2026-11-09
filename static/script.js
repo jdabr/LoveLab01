@@ -1,18 +1,18 @@
-﻿// -*- coding: utf-8 -*-
-
-// ── Single Responsibility: each class has one clear job ──
-
-// Manages the dark/light mode toggle and persists the user's preference
+﻿// Manages the dark/light mode toggle and persists the user's preference
 class ThemeManager {
     constructor(toggleBtnId) {
         this.toggleBtn = document.getElementById(toggleBtnId);
         this.darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-        this.init();
+    }
+
+    getSavedTheme() {
+        try {
+            return localStorage.getItem('theme');
+        } catch (e) { return null; /* Storage unavailable */ }
     }
 
     getPreferredTheme() {
-        return localStorage.getItem('theme') ||
-            (this.darkMediaQuery.matches ? 'dark' : 'light');
+        return this.getSavedTheme() || (this.darkMediaQuery.matches ? 'dark' : 'light');
     }
 
     applyTheme(theme) {
@@ -22,13 +22,15 @@ class ThemeManager {
 
     toggle() {
         const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-        localStorage.setItem('theme', next);
+        try {
+            localStorage.setItem('theme', next);
+        } catch (e) { /* Storage unavailable: the choice lasts for this page only */ }
         this.applyTheme(next);
     }
 
     watchSystemTheme() {
         this.darkMediaQuery.addEventListener('change', (e) => {
-            if (!localStorage.getItem('theme')) this.applyTheme(e.matches ? 'dark' : 'light');
+            if (!this.getSavedTheme()) this.applyTheme(e.matches ? 'dark' : 'light');
         });
     }
 
@@ -73,6 +75,15 @@ class MobileMenuManager {
     }
 }
 
+function createButton(className, text, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.textContent = text;
+    button.addEventListener('click', onClick);
+    return button;
+}
+
 // Handles the terms and conditions agreement and modal
 class TermsManager {
     // Change TERMS_VERSION whenever TermsAndConditions.txt is updated so visitors are asked to agree again
@@ -94,6 +105,17 @@ class TermsManager {
         this.onAgree = onAgree;
         this.previousFocus = document.activeElement;
 
+        const { modal, body, focusTarget } = this.buildModal();
+        document.body.appendChild(modal);
+        document.addEventListener('keydown', this.onKeydown);
+        this.modal = modal;
+        focusTarget.focus();
+
+        this.loadTerms(body);
+    }
+
+    // Builds the modal's elements; returns the backdrop, the body to fill, and the button to focus
+    buildModal() {
         const modal = document.createElement('div');
         modal.className = 'modal';
         // Clicking the dimmed backdrop (outside the box) closes the modal
@@ -110,12 +132,8 @@ class TermsManager {
         const title = document.createElement('h2');
         title.id = 'terms-title';
         title.textContent = 'Terms and Conditions';
-        const closeButton = document.createElement('button');
-        closeButton.type = 'button';
-        closeButton.className = 'close-button';
+        const closeButton = createButton('close-button', '×', () => this.closeModal());
         closeButton.setAttribute('aria-label', 'Close');
-        closeButton.textContent = '×';
-        closeButton.addEventListener('click', () => this.closeModal());
         header.append(title, closeButton);
 
         const body = document.createElement('div');
@@ -124,28 +142,19 @@ class TermsManager {
 
         const footer = document.createElement('div');
         footer.className = 'modal-footer';
-        const closeFooterButton = document.createElement('button');
-        closeFooterButton.type = 'button';
-        closeFooterButton.className = 'modal-button secondary';
-        closeFooterButton.textContent = 'Close';
-        closeFooterButton.addEventListener('click', () => this.closeModal());
-        footer.appendChild(closeFooterButton);
+        footer.appendChild(createButton('modal-button secondary', 'Close', () => this.closeModal()));
+        let agreeButton = null;
         if (!this.isAgreed()) {
-            const agreeButton = document.createElement('button');
-            agreeButton.type = 'button';
-            agreeButton.className = 'modal-button primary';
-            agreeButton.textContent = "I'm 18+ and agree";
-            agreeButton.addEventListener('click', () => this.agree());
+            agreeButton = createButton('modal-button primary', "I'm 18+ and agree", () => this.agree());
             footer.appendChild(agreeButton);
         }
 
         content.append(header, body, footer);
         modal.appendChild(content);
-        document.body.appendChild(modal);
-        document.addEventListener('keydown', this.onKeydown);
-        this.modal = modal;
-        (footer.querySelector('.primary') || closeButton).focus();
+        return { modal, body, focusTarget: agreeButton || closeButton };
+    }
 
+    loadTerms(body) {
         fetch('/static/TermsAndConditions.txt')
             .then(response => {
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -260,11 +269,16 @@ class Message {
         this.content = content;
     }
 
-    display(container) {
+    createElement() {
         const el = document.createElement('div');
         el.className = `message ${this.role === 'user' ? 'user-message' : 'assistant-message'}`;
         el.innerText = this.content;
-        container.appendChild(el);
+        return el;
+    }
+
+    // Adds the message to the container and scrolls so it's visible
+    display(container) {
+        container.appendChild(this.createElement());
         container.scrollTop = container.scrollHeight;
     }
 }
@@ -275,17 +289,16 @@ class ThinkingMessage extends Message {
         super('assistant', '');
     }
 
-    display(container) {
+    createElement() {
         const el = document.createElement('div');
         el.className = 'message assistant-message thinking-message';
         el.id = 'thinking-message';
-        el.innerHTML = `
-            <span class="dot"></span>
-            <span class="dot"></span>
-            <span class="dot"></span>
-        `;
-        container.appendChild(el);
-        container.scrollTop = container.scrollHeight;
+        for (let i = 0; i < 3; i++) {
+            const dot = document.createElement('span');
+            dot.className = 'dot';
+            el.appendChild(dot);
+        }
+        return el;
     }
 }
 
@@ -298,7 +311,6 @@ class ChatApp {
         this.termsManager = new TermsManager('terms-button', 'terms');
         this.sendButton = this.form.querySelector('[type="submit"]');
         this.server = new Server();
-        this.messageLog = [];
         this.isWaiting = false;
     }
 
@@ -320,7 +332,6 @@ class ChatApp {
         }
 
         this.addMessage('user', userMessage);
-        this.messageLog.push({ role: 'user', content: userMessage });
         this.showThinking();
         this.inputMessage.value = '';
         this.setWaiting(true);
@@ -329,7 +340,6 @@ class ChatApp {
             .then(response => {
                 this.hideThinking();
                 this.addMessage('assistant', response);
-                this.messageLog.push({ role: 'assistant', content: response });
             })
             .catch(error => {
                 // Always clear the typing indicator so the chat never gets stuck
@@ -371,7 +381,7 @@ class ChatApp {
 
 // ── Entry point ──
 document.addEventListener('DOMContentLoaded', () => {
-    new ThemeManager('theme-toggle');
+    new ThemeManager('theme-toggle').init();
     new MobileMenuManager('hamburger-menu', 'mobile-menu').init();
 
     if (document.getElementById('chat-form')) {
