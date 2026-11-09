@@ -1,3 +1,4 @@
 # Local development and testing only. Heroku installs requirements.txt, not this file.
 -r requirements.txt
 pytest>=8.0
+playwright>=1.40

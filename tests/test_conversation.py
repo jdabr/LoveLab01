@@ -53,6 +53,17 @@ class TestHistory:
             {"role": "user", "content": "second"},
         ]
 
+    def test_new_conversation_forgets_earlier_history(self, client, fake_openai):
+        client.post("/", json={"message": "old topic"})
+        client.post("/", json={"message": "fresh start", "new_conversation": True})
+        assert fake_openai.reply_calls[-1] == [{"role": "user", "content": "fresh start"}]
+
+    @pytest.mark.parametrize("flag", [False, "true", 1, None])
+    def test_only_an_explicit_true_starts_a_new_conversation(self, client, fake_openai, flag):
+        client.post("/", json={"message": "old topic"})
+        client.post("/", json={"message": "follow up", "new_conversation": flag})
+        assert fake_openai.reply_calls[-1][0] == {"role": "user", "content": "old topic"}
+
     def test_off_topic_messages_are_not_remembered(self, send, fake_openai):
         fake_openai.verdict = "NO"
         send("what's the weather")

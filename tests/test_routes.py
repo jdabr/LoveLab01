@@ -15,12 +15,15 @@ class TestHomePage:
         response = client.get("/")
         assert f'maxlength="{lovelab.MAX_MESSAGE_LENGTH}"'.encode() in response.data
 
-    def test_reloading_starts_a_new_conversation(self, client):
+    def test_reloading_keeps_the_conversation(self, client):
         with client.session_transaction() as sess:
             sess["messages"] = [{"role": "user", "content": "old message"}]
         client.get("/")
         with client.session_transaction() as sess:
-            assert "messages" not in sess
+            assert sess["messages"] == [{"role": "user", "content": "old message"}]
+
+    def test_has_new_chat_button(self, client):
+        assert b'id="new-chat"' in client.get("/").data
 
 
 def test_about_page(client):

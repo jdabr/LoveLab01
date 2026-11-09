@@ -17,7 +17,10 @@ class ThemeManager {
 
     applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
-        this.toggleBtn.textContent = theme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+        const [icon, label] = theme === 'dark' ? ['☀️', 'Light Mode'] : ['🌙', 'Dark Mode'];
+        this.toggleBtn.querySelector('[aria-hidden]').textContent = icon;
+        this.toggleBtn.querySelector('.header-button-label').textContent = label;
+        this.toggleBtn.setAttribute('aria-label', `Switch to ${label.toLowerCase()}`);
     }
 
     toggle() {
@@ -87,7 +90,7 @@ function createButton(className, text, onClick) {
 // Handles the terms and conditions agreement and modal
 class TermsManager {
     // Change TERMS_VERSION whenever TermsAndConditions.txt is updated so visitors are asked to agree again
-    static TERMS_VERSION = '2026-11-06.2';
+    static TERMS_VERSION = '2026-11-09.1';
     static STORAGE_KEY = 'termsAccepted';
 
     constructor(termsButtonId, termsCheckboxId) {
@@ -246,11 +249,12 @@ class TermsManager {
 
 // Handles communication with the Flask backend
 class Server {
-    postMessage(message) {
+    // newConversation tells the server to forget any earlier history before replying
+    postMessage(message, newConversation) {
         return fetch('/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message }),
+            body: JSON.stringify({ message, new_conversation: newConversation }),
         })
             .then(response => response.json()
                 // Non-JSON responses (e.g. an HTML error page) become a readable error
@@ -259,6 +263,98 @@ class Server {
                 if (!data || typeof data.message !== 'string') throw new Error('Invalid server response');
                 return data.message;
             });
+    }
+
+    // Erases the AI's memory of the conversation on the server right away
+    deleteConversation() {
+        return fetch('/conversation', { method: 'DELETE' }).then(response => {
+            if (!response.ok) throw new Error(`Server error (${response.status})`);
+        });
+    }
+
+    // Tells the server whether to keep the AI's memory of the conversation after the browser closes
+    setRemember(remember) {
+        return fetch('/preferences', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ remember }),
+        }).then(response => {
+            if (!response.ok) throw new Error(`Server error (${response.status})`);
+        });
+    }
+}
+
+// Saves the visible conversation in the browser so it can be shown again later.
+// - By default it uses sessionStorage: it survives a refresh but is erased when the tab closes,
+//   so conversations don't linger on shared devices.
+// - With "Remember this chat on this device" on, it uses localStorage instead, so it also survives
+//   closing the browser or restarting the computer, and expires after rememberDays without a new message.
+class ConversationStore {
+    static KEY = 'lovelab.conversation';
+    static REMEMBER_KEY = 'lovelab.remember';
+    static MAX_MESSAGES = 200;
+
+    constructor(rememberDays) {
+        this.maxAgeMs = rememberDays * 24 * 60 * 60 * 1000;
+    }
+
+    isRemembered() {
+        try {
+            return localStorage.getItem(ConversationStore.REMEMBER_KEY) === 'on';
+        } catch (e) { return false; /* Storage unavailable */ }
+    }
+
+    storage() {
+        return this.isRemembered() ? localStorage : sessionStorage;
+    }
+
+    load() {
+        try {
+            const saved = JSON.parse(this.storage().getItem(ConversationStore.KEY));
+            if (!saved || !Array.isArray(saved.messages)) return [];
+            if (this.isRemembered() && Date.now() - saved.savedAt > this.maxAgeMs) {
+                this.clear();  // Expired
+                return [];
+            }
+            return saved.messages.filter(m =>
+                m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
+        } catch (e) { return []; /* Storage unavailable or corrupted */ }
+    }
+
+    save(messages) {
+        try {
+            const saved = { savedAt: Date.now(), messages: messages.slice(-ConversationStore.MAX_MESSAGES) };
+            this.storage().setItem(ConversationStore.KEY, JSON.stringify(saved));
+        } catch (e) { /* Storage unavailable or full: the conversation just won't be restored */ }
+    }
+
+    add(role, content) {
+        this.save([...this.load(), { role, content }]);
+    }
+
+    // Deletes the saved conversation from both kinds of storage
+    clear() {
+        for (const storage of ['sessionStorage', 'localStorage']) {
+            try {
+                window[storage].removeItem(ConversationStore.KEY);
+            } catch (e) { /* Storage unavailable */ }
+        }
+    }
+
+    // Moves the current conversation to the storage that matches the new setting
+    setRemembered(remember) {
+        const messages = this.load();
+        this.clear();
+        try {
+            if (remember) localStorage.setItem(ConversationStore.REMEMBER_KEY, 'on');
+            else localStorage.removeItem(ConversationStore.REMEMBER_KEY);
+        } catch (e) { /* Storage unavailable */ }
+        if (messages.length) this.save(messages);
+    }
+
+    // True once the server has replied in this conversation, so it holds matching history
+    hasServerReply() {
+        return this.load().some(m => m.role === 'assistant');
     }
 }
 
@@ -310,7 +406,12 @@ class ChatApp {
         this.inputMessage = document.getElementById('input-message');
         this.termsManager = new TermsManager('terms-button', 'terms');
         this.sendButton = this.form.querySelector('[type="submit"]');
+        this.newChatButton = document.getElementById('new-chat');
+        this.deleteChatButton = document.getElementById('delete-chat');
+        this.rememberSwitch = document.getElementById('remember-chat');
+        this.rememberNote = document.getElementById('remember-note');
         this.server = new Server();
+        this.store = new ConversationStore(Number(this.form.dataset.rememberDays) || 30);
         this.isWaiting = false;
     }
 
@@ -331,15 +432,19 @@ class ChatApp {
             return;
         }
 
+        const newConversation = !this.store.hasServerReply();
         this.addMessage('user', userMessage);
+        this.store.add('user', userMessage);
+        this.updateDeleteButton();
         this.showThinking();
         this.inputMessage.value = '';
         this.setWaiting(true);
 
-        this.server.postMessage(userMessage)
+        this.server.postMessage(userMessage, newConversation)
             .then(response => {
                 this.hideThinking();
                 this.addMessage('assistant', response);
+                this.store.add('assistant', response);
             })
             .catch(error => {
                 // Always clear the typing indicator so the chat never gets stuck
@@ -353,10 +458,16 @@ class ChatApp {
             });
     }
 
-    // Disables Send while a reply is pending so messages can't be double-sent; typing stays allowed
+    // Disables Send (and Delete chat) while a reply is pending so messages can't be double-sent
+    // and a reply can't arrive into a deleted chat; typing stays allowed
     setWaiting(waiting) {
         this.isWaiting = waiting;
         if (this.sendButton) this.sendButton.disabled = waiting;
+        this.updateDeleteButton();
+    }
+
+    updateDeleteButton() {
+        if (this.deleteChatButton) this.deleteChatButton.disabled = this.isWaiting || !this.store.load().length;
     }
 
     addMessage(role, content) {
@@ -371,9 +482,75 @@ class ChatApp {
         document.getElementById('thinking-message')?.remove();
     }
 
+    // Redraws the conversation saved before a refresh, below the welcome message
+    restoreConversation() {
+        this.store.load().forEach(({ role, content }) => this.addMessage(role, content));
+    }
+
+    // Removes the saved conversation and every message except the welcome message (rendered first)
+    clearConversation() {
+        this.store.clear();
+        [...this.messageContainer.children].slice(1).forEach(el => el.remove());
+        this.inputMessage.value = '';
+        this.updateDeleteButton();
+        this.inputMessage.focus();
+    }
+
+    // Starts over; the server forgets the old conversation when the next message is sent
+    startNewChat() {
+        if (this.isWaiting) return;
+        if (this.store.load().length && !window.confirm('Start a new chat? This conversation will be cleared.')) return;
+        this.clearConversation();
+    }
+
+    // Erases the conversation from this device and the AI's memory right away
+    deleteChat() {
+        if (this.isWaiting || !this.store.load().length) return;
+        const confirmed = window.confirm(
+            'Delete this chat?\n\nIt will be erased from this device and from LoveLab\'s memory, and can\'t be '
+            + 'recovered. (Anonymous copies kept by LoveLab, described in the Terms, can\'t be deleted.)');
+        if (!confirmed) return;
+        this.deleteChatButton.disabled = true;
+        this.server.deleteConversation()
+            .then(() => this.clearConversation())
+            .catch(error => {
+                console.error('Error deleting chat:', error);
+                window.alert('Sorry, the chat couldn\'t be deleted. Please try again.');
+                this.updateDeleteButton();
+            });
+    }
+
+    showRememberSetting(remember) {
+        if (this.rememberSwitch) this.rememberSwitch.checked = remember;
+        if (this.rememberNote) this.rememberNote.hidden = !remember;
+    }
+
+    // The server is told first so the AI's memory and the saved conversation always last equally long;
+    // if that fails, the switch goes back to how it was
+    toggleRemember() {
+        const remember = this.rememberSwitch.checked;
+        this.rememberSwitch.disabled = true;
+        this.server.setRemember(remember)
+            .then(() => {
+                this.store.setRemembered(remember);
+                this.showRememberSetting(remember);
+            })
+            .catch(error => {
+                console.error('Error saving setting:', error);
+                this.showRememberSetting(!remember);
+            })
+            .finally(() => { this.rememberSwitch.disabled = false; });
+    }
+
     init() {
         this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+        this.newChatButton?.addEventListener('click', () => this.startNewChat());
+        this.deleteChatButton?.addEventListener('click', () => this.deleteChat());
+        this.rememberSwitch?.addEventListener('change', () => this.toggleRemember());
         this.termsManager.init();
+        this.showRememberSetting(this.store.isRemembered());
+        this.restoreConversation();
+        this.updateDeleteButton();
         // Focus the message box on desktop only; on phones it would pop the keyboard open on page load
         if (window.matchMedia('(pointer: fine)').matches) this.inputMessage.focus();
     }

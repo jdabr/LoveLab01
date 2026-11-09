@@ -39,13 +39,17 @@
                 <div class="hamburger-line"></div>
                 <div class="hamburger-line"></div>
             </div>
-            {% block header %}LoveLab{% endblock %}
+            <span class="header-title">{% block header %}LoveLab{% endblock %}</span>
+            <div class="header-actions">
+                {% block header_actions %}{% endblock %}
+                <button type="button" id="theme-toggle" class="header-button" aria-label="Switch to dark mode">
+                    <span aria-hidden="true">🌙</span><span class="header-button-label">Dark Mode</span>
+                </button>
+            </div>
         </div>
 
         {% block content %}{% endblock %}
     </div>
-
-    <button id="theme-toggle">🌙 Dark Mode</button>
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>

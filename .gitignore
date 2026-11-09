@@ -5,3 +5,4 @@ __pycache__/
 .idea/
 .vs/
 .pytest_cache/
+dev/screenshots/

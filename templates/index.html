@@ -1,5 +1,14 @@
 ﻿{% extends "base.html" %}
 
+{% block header_actions %}
+                <button type="button" id="new-chat" class="header-button" aria-label="New chat">
+                    <span aria-hidden="true">＋</span><span class="header-button-label">New chat</span>
+                </button>
+                <button type="button" id="delete-chat" class="header-button" aria-label="Delete chat" disabled>
+                    <span aria-hidden="true">🗑</span><span class="header-button-label">Delete chat</span>
+                </button>
+{% endblock %}
+
 {% block content %}
         <div id="message-container">
             {% for message in messages %}
@@ -10,7 +19,7 @@
         </div>
 
         <div class="input-container">
-            <form id="chat-form">
+            <form id="chat-form" data-remember-days="{{ remember_days }}">
                 <div class="input-wrapper">
                     <input type="text" id="input-message" name="message" maxlength="{{ max_message_length }}" autocomplete="off" placeholder="Type your message here">
                     <input type="submit" value="Send">
@@ -19,7 +28,15 @@
             <div class="terms-container">
                 <input type="checkbox" id="terms" name="terms">
                 <label for="terms">I&#39;m 18 or older and agree to the Terms and Conditions</label>
+                <label class="remember-toggle">
+                    <input type="checkbox" id="remember-chat" role="switch" aria-describedby="remember-note">
+                    <span>Remember this chat on this device</span>
+                </label>
                 <button id="terms-button">Terms and Conditions</button>
             </div>
+            <p id="remember-note" class="remember-note" hidden>
+                Saved in this browser for {{ remember_days }} days after your last message. Anyone using this
+                browser could see it, so leave this off on shared devices. Delete chat erases it at any time.
+            </p>
         </div>
 {% endblock %}

@@ -45,6 +45,10 @@ MAX_HISTORY_MESSAGES = 6
 # Browsers reject cookies over ~4KB, which silently erased the conversation history. History is
 # trimmed (oldest first) until the signed session cookie fits this budget.
 MAX_SESSION_COOKIE_BYTES = 3500
+# With "Remember this chat on this device" turned on, the session cookie (and the conversation saved
+# in the browser) lasts this many days after the last visit, instead of ending when the browser closes
+REMEMBER_DAYS = 30
+PREFERENCES_RATE_LIMIT = "30 per minute"
 
 # Column sizes for stored chat logs; longer messages are truncated before saving
 LOGGED_USER_MESSAGE_LENGTH = 255
@@ -194,6 +198,8 @@ if not os.environ.get("SECRET_KEY"):
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = ENV != "dev"  # HTTPS-only cookies in production
+# Only applies once a visitor turns on "Remember this chat" (session.permanent); renewed on each visit
+app.config["PERMANENT_SESSION_LIFETIME"] = datetime.timedelta(days=REMEMBER_DAYS)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024  # Reject oversized request bodies
 
 limiter = Limiter(
@@ -409,13 +415,13 @@ def rate_limited(_error):
 @limiter.shared_limit(GLOBAL_CHAT_RATE_LIMIT, scope="global-chat", key_func=lambda: "all-visitors", methods=["POST"])
 def home():
     if request.method == "GET":
-        # Refreshing the page starts a new conversation. The welcome message is display-only:
-        # it isn't stored in the session or sent to the model.
-        session.pop("messages", None)
+        # The browser redraws the visible conversation itself after a refresh, so the history is
+        # kept here. The welcome message is display-only: it isn't stored or sent to the model.
         return render_template(
             "index.html",
             messages=[{"role": "assistant", "content": WELCOME_MESSAGE}],
             max_message_length=MAX_MESSAGE_LENGTH,
+            remember_days=REMEMBER_DAYS,
         )
 
     data = request.get_json(silent=True) or {}
@@ -426,6 +432,11 @@ def home():
     if len(user_message) > MAX_MESSAGE_LENGTH:
         return jsonify({"message": TOO_LONG_REPLY}), 400
 
+    # The page sends this with the first message of a conversation it's showing (a new tab, or
+    # after "New chat"), so the model never remembers a conversation the user can no longer see
+    if data.get("new_conversation") is True:
+        session.pop("messages", None)
+
     try:
         assistant_message = respond_to(user_message)
     except Exception:
@@ -435,6 +446,33 @@ def home():
 
     log_exchange(user_message, assistant_message)
     return jsonify({"message": assistant_message})
+
+
+@app.route("/preferences", methods=["POST"])
+@limiter.limit(PREFERENCES_RATE_LIMIT)
+def preferences():
+    """Turn "Remember this chat on this device" on or off.
+
+    On, the session cookie (which holds the AI's memory of the conversation) lasts REMEMBER_DAYS;
+    off, it ends when the browser closes. The browser keeps its own copy of the visible conversation.
+    """
+    data = request.get_json(silent=True) or {}
+    remember = data.get("remember")
+    if not isinstance(remember, bool):
+        return jsonify({"message": "Please send remember as true or false."}), 400
+    session.permanent = remember
+    return jsonify({"remember": remember})
+
+
+@app.route("/conversation", methods=["DELETE"])
+@limiter.limit(PREFERENCES_RATE_LIMIT)
+def delete_conversation():
+    """Erase the AI's memory of the conversation (the history in the session cookie) right away.
+
+    The "Remember this chat" setting is kept. Anonymized log copies are unaffected (see the Terms).
+    """
+    session.pop("messages", None)
+    return jsonify({"deleted": True})
 
 
 @app.route("/about")
