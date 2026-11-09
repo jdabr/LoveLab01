@@ -28,6 +28,8 @@
                 <div class="suggestions" id="suggestions" aria-label="Example questions"></div>
             </section>
         </div>
+        <!-- Screen readers read out each reply here as it arrives -->
+        <div class="visually-hidden" id="chat-announcer" aria-live="polite"></div>
 
         <div class="input-container">
             <form id="chat-form" data-remember-days="{{ remember_days }}">

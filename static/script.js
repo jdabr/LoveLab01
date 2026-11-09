@@ -313,7 +313,9 @@ class Server {
         }).then(response => response.json()
             .catch(() => null)  // Non-JSON responses (e.g. an HTML error page)
             .then(data => {
-                if (!data || typeof data.message !== 'string') throw new Error(`Server error (${response.status})`);
+                if (!data || typeof data.message !== 'string' || !data.message.trim()) {
+                    throw new Error(`Server error (${response.status})`);
+                }
                 if (!response.ok) throw Object.assign(new Error(data.message), { userMessage: data.message });
                 return { message: data.message, history: typeof data.history === 'string' ? data.history : null };
             }));
@@ -327,7 +329,8 @@ class Server {
 //   so conversations don't linger on shared devices.
 // - With "Remember my chats on this device" on, it's in localStorage instead, so it also survives
 //   closing the browser. Chats are then deleted rememberDays after their last message, and people
-//   with no chats left are deleted rememberDays after they were last used.
+//   with no chats left are deleted rememberDays after they were last used. Every open tab shares that
+//   copy, so each tab picks up the others' changes (see syncFromOtherTab).
 // Each chat also holds its signed history token: the AI's memory of that chat (see app.py).
 class ChatLibrary {
     static KEY = 'lovelab.chats';
@@ -339,7 +342,9 @@ class ChatLibrary {
 
     constructor(rememberDays) {
         this.maxAgeMs = rememberDays * 24 * 60 * 60 * 1000;
+        this.onSaveFailed = null;  // Called when the browser refuses to save, usually because its storage is full
         for (const name of ['sessionStorage', 'localStorage']) getStorage(name)?.removeItem(ChatLibrary.LEGACY_KEY);
+        this.remembered = this.isRemembered();
         this.data = this.read();
         this.pruneExpired();
     }
@@ -376,7 +381,9 @@ class ChatLibrary {
     persist() {
         try {
             this.storage()?.setItem(ChatLibrary.KEY, JSON.stringify(this.data));
-        } catch (e) { /* Storage full: the chats just won't be restored */ }
+        } catch (e) {
+            this.onSaveFailed?.();
+        }
     }
 
     pruneExpired() {
@@ -388,13 +395,55 @@ class ChatLibrary {
         this.persist();
     }
 
-    // Moves everything to the storage that matches the new setting
+    // Moves everything to the storage that matches the new setting. Other open tabs see each change in
+    // order (see syncFromOtherTab), so the order matters: the chats are saved before Remember is turned
+    // on, and Remember is turned off before the shared copy is removed.
     setRemembered(remember) {
-        for (const name of ['sessionStorage', 'localStorage']) getStorage(name)?.removeItem(ChatLibrary.KEY);
         const local = getStorage('localStorage');
-        if (remember) local?.setItem(ChatLibrary.REMEMBER_KEY, 'on');
-        else local?.removeItem(ChatLibrary.REMEMBER_KEY);
-        this.persist();
+        if (remember) {
+            try {
+                local?.setItem(ChatLibrary.KEY, JSON.stringify(this.data));
+                local?.setItem(ChatLibrary.REMEMBER_KEY, 'on');
+                getStorage('sessionStorage')?.removeItem(ChatLibrary.KEY);
+            } catch (e) {
+                // Couldn't save (e.g. storage full): leave Remember off and keep this tab's copy
+                local?.removeItem(ChatLibrary.REMEMBER_KEY);
+                local?.removeItem(ChatLibrary.KEY);
+                this.onSaveFailed?.();
+            }
+        } else {
+            local?.removeItem(ChatLibrary.REMEMBER_KEY);
+            local?.removeItem(ChatLibrary.KEY);
+            this.persist();  // Into this tab's sessionStorage
+        }
+        this.remembered = this.isRemembered();
+    }
+
+    // Another tab changed the saved chats or the Remember setting. Without this, each tab would save over
+    // the other's changes.
+    syncFromOtherTab() {
+        const remembered = this.isRemembered();
+        if (remembered && !this.remembered) {
+            // Another tab turned Remember on: keep this tab's chats as well as theirs
+            this.data = ChatLibrary.merge(this.read(), this.data);
+            this.persist();
+        } else if (remembered) {
+            this.data = this.read();  // The tabs share one copy: take the latest
+        } else if (this.remembered) {
+            // Another tab turned Remember off: like theirs, this tab's chats now last until it's closed
+            this.persist();
+        }
+        this.remembered = remembered;
+    }
+
+    // Combines two libraries, keeping the most recently updated version of anything that's in both
+    static merge(a, b) {
+        const newest = (...lists) => [...lists.flat().reduce((byId, item) => {
+            const existing = byId.get(item.id);
+            if (!existing || item.updatedAt > existing.updatedAt) byId.set(item.id, item);
+            return byId;
+        }, new Map()).values()];
+        return { people: newest(a.people, b.people), chats: newest(a.chats, b.chats), activeChatId: b.activeChatId };
     }
 
     // ── People ──
@@ -554,15 +603,18 @@ function scrollToMessage(container, element) {
     container.scrollTop += top - margin;
 }
 
-// Represents a single chat message and renders it in the chat container
+// Represents a single chat message and renders it in the chat container. Errors (isError) are shown
+// like replies but never saved.
 class Message {
-    constructor(role, content) {
+    constructor(role, content, isError = false) {
         this.role = role;
         this.content = content;
+        this.isError = isError;
     }
 
     createElement() {
         const element = createElement('div', `message ${this.role === 'user' ? 'user-message' : 'assistant-message'}`);
+        if (this.isError) element.classList.add('error-message');
         if (this.role === 'user') element.textContent = this.content;  // Line breaks kept by CSS
         else renderRichText(element, this.content);
         return element;
@@ -636,9 +688,18 @@ const SUGGESTIONS = {
     ],
 };
 
+// The first character as a reader sees it, so an emoji (made of several code units) isn't cut in half
+function firstCharacter(text) {
+    const trimmed = text.trim();
+    if (window.Intl?.Segmenter) {
+        for (const { segment } of new Intl.Segmenter().segment(trimmed)) return segment;
+    }
+    return [...trimmed][0] ?? '';
+}
+
 // A round badge with the person's initial, coloured consistently from their id
 function createAvatar(person) {
-    const avatar = createElement('span', 'person-avatar', person ? person.name.trim().charAt(0).toUpperCase() : '✦');
+    const avatar = createElement('span', 'person-avatar', person ? firstCharacter(person.name).toUpperCase() : '✦');
     avatar.setAttribute('aria-hidden', 'true');
     if (person) {
         const hash = [...person.id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7);
@@ -707,9 +768,12 @@ class ChatApp {
         this.emptyState = document.getElementById('empty-state');
         this.emptyTitle = document.getElementById('empty-title');
         this.suggestions = document.getElementById('suggestions');
+        this.announcer = document.getElementById('chat-announcer');
         this.termsManager = new TermsManager('terms-button', 'terms');
         this.server = new Server();
         this.library = new ChatLibrary(Number(this.form.dataset.rememberDays) || 30);
+        this.library.onSaveFailed = () => this.warnSaveFailed();
+        this.saveWarningShown = false;
         this.current = { chatId: null, personId: null };
         this.pendingChatId = null;  // The chat waiting for a reply, if any
     }
@@ -748,6 +812,7 @@ class ChatApp {
                 if (this.current.chatId === chatId) {
                     this.hideThinking();
                     this.addMessage('assistant', message);
+                    this.announce(message);
                 }
             })
             .catch(error => {
@@ -755,16 +820,39 @@ class ChatApp {
                 // not saved, so they don't reappear later or replace the chat's history.
                 console.error('Error:', error);
                 if (this.current.chatId === chatId) {
+                    const message = error.userMessage
+                        || 'Sorry, something went wrong on our end. Please try again in a moment.';
                     this.hideThinking();
-                    this.addMessage('assistant', error.userMessage
-                        || 'Sorry, something went wrong on our end. Please try again in a moment.');
+                    this.addMessage('assistant', message, true);
+                    this.announce(message);
                 }
             })
             .finally(() => {
                 this.setPending(null);
                 this.renderSidebar();
-                this.inputMessage.focus();
+                this.focusInput();
             });
+    }
+
+    // Screen readers read out each reply as it arrives. (The message list itself isn't a live region, or
+    // switching chats would read out the whole conversation.)
+    announce(text) {
+        this.announcer.textContent = '';
+        // Set after a pause, so a reply identical to the last one is still announced
+        setTimeout(() => { this.announcer.textContent = `LoveLab: ${text}`; }, 100);
+    }
+
+    // The browser refused to save the chats, usually because its storage for this site is full. Say so
+    // once, rather than letting new messages silently disappear on the next visit.
+    warnSaveFailed() {
+        if (this.saveWarningShown) return;
+        this.saveWarningShown = true;
+        Modal.alert({
+            title: 'Your chats couldn\'t be saved',
+            message: 'This browser isn\'t letting LoveLab save your chats, usually because its storage is full. '
+                + 'New messages won\'t be kept after you leave or refresh the page. Deleting some old chats '
+                + 'may free up space.',
+        });
     }
 
     // Disables Send (and Delete chat) while a reply is pending so messages can't be double-sent and a
@@ -776,9 +864,9 @@ class ChatApp {
         this.updateHeader();
     }
 
-    addMessage(role, content) {
+    addMessage(role, content, isError = false) {
         this.showEmptyState(false);
-        new Message(role, content).display(this.messageContainer);
+        new Message(role, content, isError).display(this.messageContainer);
     }
 
     // An empty chat shows a greeting and example questions suited to who the chat is about
@@ -818,17 +906,53 @@ class ChatApp {
         const chat = chatId ? this.library.getChat(chatId) : null;
         this.current = { chatId: chat?.id ?? null, personId: chat ? chat.personId : personId };
         this.library.setActive(this.current.chatId);
-
-        this.messageContainer.querySelectorAll('.message').forEach(element => element.remove());
-        this.showEmptyState(!chat?.messages.length);
-        chat?.messages.forEach(({ role, content }) => this.addMessage(role, content));
-        if (chat && chat.id === this.pendingChatId) this.showThinking();
+        this.renderMessages(chat);
 
         this.inputMessage.value = '';
         this.updateHeader();
         this.renderSidebar();
         this.drawer?.close();
         this.focusInput();
+    }
+
+    // Shows a chat's saved messages, or the greeting if it has none
+    renderMessages(chat) {
+        this.messageContainer.querySelectorAll('.message').forEach(element => element.remove());
+        this.showEmptyState(!chat?.messages.length);
+        chat?.messages.forEach(({ role, content }) => this.addMessage(role, content));
+        if (chat && chat.id === this.pendingChatId) this.showThinking();
+    }
+
+    // Another tab changed the saved chats: catch up without disturbing anything being typed here
+    handleStorageEvent(event) {
+        const local = getStorage('localStorage');
+        if (!local || event.storageArea !== local) return;
+        if (![ChatLibrary.KEY, ChatLibrary.REMEMBER_KEY, null].includes(event.key)) return;  // null: storage cleared
+
+        this.library.syncFromOtherTab();
+        this.showRememberSetting(this.library.isRemembered());
+        const { chatId, personId } = this.current;
+        const chat = chatId ? this.library.getChat(chatId) : null;
+        if (chatId && !chat) {
+            // This chat was deleted in the other tab: start a new one about the same person, if they're still here
+            this.current = { chatId: null, personId: this.library.getPerson(personId) ? personId : null };
+            this.renderMessages(null);
+        } else if (!chatId && personId && !this.library.getPerson(personId)) {
+            // A new chat about someone who was deleted in the other tab
+            this.current.personId = null;
+            this.renderMessages(null);
+        } else if (chat) {
+            this.current.personId = chat.personId;
+            // Redraw only if the other tab added messages to this chat
+            if (chat.messages.length !== this.shownMessageCount()) this.renderMessages(chat);
+        }
+        this.updateHeader();
+        this.renderSidebar();
+    }
+
+    // How many of the chat's saved messages are on screen (errors and the typing indicator aren't saved)
+    shownMessageCount() {
+        return this.messageContainer.querySelectorAll('.message:not(.thinking-message):not(.error-message)').length;
     }
 
     // Opens a chat after choosing who it's about
@@ -1041,9 +1165,10 @@ class ChatApp {
         this.addPersonButton.addEventListener('click', () => this.addPerson());
         this.chatList.addEventListener('click', (e) => this.handleChatListClick(e));
         this.suggestions.addEventListener('click', (e) => this.useSuggestion(e));
+        window.addEventListener('storage', (e) => this.handleStorageEvent(e));
         this.rememberSwitch.addEventListener('change', () => {
             this.library.setRemembered(this.rememberSwitch.checked);
-            this.showRememberSetting(this.rememberSwitch.checked);
+            this.showRememberSetting(this.library.isRemembered());  // Stays off if the browser blocks storage
         });
         this.termsManager.init();
         this.showRememberSetting(this.library.isRemembered());

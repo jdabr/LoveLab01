@@ -372,6 +372,22 @@ body {
 
 .user-message { white-space: pre-wrap; }
 
+/* Errors (e.g. "please try again") are shown but never saved with the chat */
+.assistant-message.error-message { border-color: var(--danger); }
+
+/* Read out by screen readers but not shown on screen */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
 /* Formatted replies: paragraphs, lists and bold text */
 .assistant-message > * { margin: 0; }
 .assistant-message > * + * { margin-top: 0.75em; }
@@ -1145,7 +1161,8 @@ p {
 }
 
 /* ── Responsive / Mobile ── */
-@media (max-width: 768px) {
+/* Phones, and short screens such as phones held sideways: the sidebar becomes a slide-in drawer */
+@media (max-width: 768px), (max-height: 500px) {
     :root { --gutter: 1rem; }
 
     .sidebar {
@@ -1172,6 +1189,11 @@ p {
     .user-message { max-width: 85%; }
     .assistant-message { max-width: 95%; }
 
+    .input-container { padding: 0.75rem var(--gutter) var(--gutter); }
+}
+
+/* Narrow screens: the options under the message box stack up */
+@media (max-width: 768px) {
     .terms-container {
         flex-direction: column;
         align-items: center;
@@ -1187,9 +1209,17 @@ p {
         max-width: 280px;
     }
 
-    .input-container { padding: 0.75rem var(--gutter) var(--gutter); }
-
     .input-wrapper input[type="text"] { font-size: 0.85rem; }
+}
+
+/* Short screens: tighter spacing, so the conversation keeps as much room as possible */
+@media (max-height: 500px) {
+    .chat-header { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+    .input-container { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+    .terms-container { margin-top: 0.4rem; }
+    .empty-state { padding: 0.5rem 0; }
+    .empty-title { font-size: 1.35rem; }
+    .empty-text { display: none; }
 }
 /* Respect the visitor's "reduce motion" setting */
 @media (prefers-reduced-motion: reduce) {
