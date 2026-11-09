@@ -471,7 +471,7 @@ def delete_yesterdays_visitor_secret():
 
 @app.cli.command("purge-visitor-salts")
 def purge_visitor_salts_command():
-    """Delete visitor-ID secrets from earlier days. Schedule daily (e.g. Heroku Scheduler, 00:10 UTC)."""
+    """Delete visitor-ID secrets from earlier days. Schedule daily (e.g. Heroku Scheduler, 00:30 UTC)."""
     deleted = chat_logger.delete_expired_salts()
     print(f"Deleted {deleted} expired visitor secret(s).")
 
