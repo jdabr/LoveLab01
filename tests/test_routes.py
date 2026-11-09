@@ -23,6 +23,10 @@ class TestHomePage:
     def test_remember_period_is_passed_to_the_page(self, client):
         assert f'data-remember-days="{lovelab.REMEMBER_DAYS}"'.encode() in client.get("/").data
 
+    def test_head_request_succeeds(self, client):
+        # Link previewers and uptime monitors check pages with HEAD.
+        assert client.head("/").status_code == 200
+
 
 def test_no_cookies_are_set(client, send):
     # Chat history travels in signed history tokens, so LoveLab needs no cookies at all

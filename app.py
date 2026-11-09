@@ -490,7 +490,7 @@ def rate_limited(_error):
 @limiter.limit(CHAT_RATE_LIMIT, methods=["POST"])
 @limiter.shared_limit(GLOBAL_CHAT_RATE_LIMIT, scope="global-chat", key_func=lambda: "all-visitors", methods=["POST"])
 def home():
-    if request.method == "GET":
+    if request.method in ("GET", "HEAD"):
         # The browser draws the visitor's saved chats itself. The welcome message is display-only:
         # it isn't stored or sent to the model.
         return render_template(
