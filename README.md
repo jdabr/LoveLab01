@@ -22,6 +22,36 @@ partner, family, friends or coworkers and get warm, practical guidance, with no 
   self-harm always get a caring reply with crisis resources.
 - **Responsive.** Works on phones and large monitors, in light and dark mode.
 
+## How a message flows through the app
+
+```mermaid
+flowchart LR
+    B[Browser] -->|POST /| L{Rate limiter}
+    L -->|over limit| R429[429 with a friendly message]
+    L --> F[Topic classifier<br/>OpenAI]
+    F -->|not YES| OT[Friendly off-topic reply]
+    F -->|YES| M[Reply model<br/>OpenAI<br/>recent history from the chat's signed token]
+    M --> S[Scrub contact details]
+    OT --> S
+    S --> DB[(Postgres<br/>anonymized log)]
+    M --> B
+    OT --> B
+```
+
+## Privacy and safety design
+
+| Concern | Approach |
+|---|---|
+| Prompt injection | Rules live in `instructions`, and user text is always passed as a separate message. The classifier treats the message as untrusted data and rejects attempts to change its task. The reply prompt tells the model to ignore role or persona changes. |
+| Forged history | Each chat's recent history travels as a signed token (itsdangerous) that expires after 31 days. Tampered, expired or foreign-key tokens are ignored, and even a valid token only contributes `user` and `assistant` text. |
+| Anonymous analytics | IPs are HMAC-hashed with a random secret that **rotates daily** and is then deleted. Messages from one visitor can be grouped within a day, but never linked to an IP address or across days. |
+| Data kept by third parties | OpenAI calls use `store=False`, so conversations aren't kept for later retrieval in the OpenAI dashboard. |
+| Shared devices | Chats are saved in `sessionStorage` (cleared when the tab closes) unless the visitor opts in to remembering, and remembered chats expire 30 days after their last message. The site sets no cookies, so deleting a chat on the device leaves nothing behind except the anonymized log. |
+| Encryption in transit | In production, plain-HTTP requests are redirected to HTTPS (`308` for `POST`, so messages aren't silently dropped), and an `HSTS` header tells browsers to use HTTPS for the site from then on. |
+| Cross-site attacks | A strict Content-Security-Policy (no inline scripts or styles), `X-Frame-Options: DENY`, and no cookies to steal or ride on. All user-supplied text, including people's names, is rendered with `textContent`, never as HTML. |
+| Cost and availability | Per-call timeouts keep both OpenAI calls within Heroku's 30-second limit, automatic retries are off, and a moving-window rate limit caps usage per visitor and globally. |
+| Crisis situations | Both prompts treat safety as overriding the topic rule: the classifier always lets these messages through, and the reply model is instructed to share emergency, 988 and domestic-violence resources. |
+
 ## Tech stack
 
 Python, Flask, SQLAlchemy, PostgreSQL, the OpenAI Responses API, plain HTML/CSS/JavaScript,
