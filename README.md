@@ -19,10 +19,12 @@ creating an account and without their conversations being traceable back to them
 - **Focused, safe conversations.** A classifier turns away off-topic requests with a friendly reply.
   Messages about self-harm, abuse or danger are always let through, and the model is instructed to
   respond with care and share crisis resources.
-- **Conversations that survive a refresh.** An opt-in *Remember this chat on this device* setting keeps
-  them across browser restarts for 30 days.
-- **Visitor control.** *New chat* starts over and *Delete chat* erases the conversation from the device
-  and from the AI's memory immediately.
+- **Chats organized by person.** Visitors add the people in their life (a partner, a parent, a coworker)
+  and keep separate chats about each, all stored on their own device. Names never leave the browser.
+- **Chats that survive a refresh.** An opt-in *Remember my chats on this device* setting keeps them
+  across browser restarts for 30 days.
+- **Visitor control.** Deleting a chat or a person erases it from the device, and with it the AI's
+  memory, immediately. The server keeps no conversation state to delete.
 - **Anonymous by design.** There are no accounts, IP addresses are never stored, and contact details
   are removed before anything is logged.
 - **Responsive layout.** It scales from phones to 1440p monitors, with light and dark themes.
@@ -35,7 +37,7 @@ flowchart LR
     L -->|over limit| R429[429 with a friendly message]
     L --> F[Topic classifier<br/>OpenAI]
     F -->|not YES| OT[Friendly off-topic reply]
-    F -->|YES| M[Reply model<br/>OpenAI<br/>recent history from the session cookie]
+    F -->|YES| M[Reply model<br/>OpenAI<br/>recent history from the chat's signed token]
     M --> S[Scrub contact details]
     OT --> S
     S --> DB[(Postgres<br/>anonymized log)]
@@ -48,9 +50,11 @@ flowchart LR
 2. **Topic classifier.** A small model call answers `YES` or `NO`. It sees LoveLab's previous reply,
    so short answers like "not really" are judged in context. It **fails closed**: anything other than a
    clear `YES` is treated as off-topic.
-3. **Reply.** The main model receives the system prompt plus the last few messages. History is kept in
-   a signed session cookie and filtered to `user` and `assistant` roles, so a tampered cookie can't
-   inject system instructions.
+3. **Reply.** The main model receives the system prompt plus the chat's last few messages. Each chat's
+   history travels as a **signed history token**: the server returns it with every reply, the browser
+   stores it with that chat, and sends it back with the next message. The server is stateless, so
+   visitors can keep many independent chats, and the signature stops anyone from inventing earlier
+   messages.
 4. **Logging.** The exchange is saved after removing emails, phone and card numbers, links and handles,
    under a visitor ID that can't be traced back to the visitor.
 
@@ -61,12 +65,12 @@ These are the parts I'd point to first.
 | Concern | Approach |
 |---|---|
 | Prompt injection | Rules live in `instructions`, and user text is always passed as a separate message. The classifier treats the message as untrusted data and rejects attempts to change its task. The reply prompt tells the model to ignore role or persona changes. |
-| Forged history | Session history is signed, and only `user` and `assistant` messages with text content are ever sent to the model. |
+| Forged history | History tokens are signed with `SECRET_KEY` (itsdangerous) and expire after 31 days. Tampered, expired or foreign-key tokens are ignored, and even a valid token only contributes `user` and `assistant` text. |
 | Anonymous analytics | IPs are HMAC-hashed with a random secret that **rotates daily** and is then deleted (on the first request of a new day, plus a scheduled `flask purge-visitor-salts`). Messages from one visitor can be grouped within a day, but never linked to an IP address or across days. |
 | Data kept by third parties | OpenAI calls use `store=False`, so conversations aren't kept for later retrieval in the OpenAI dashboard. |
-| Shared devices | Conversations are saved in `sessionStorage` (cleared when the tab closes) unless the visitor opts in to remembering. *Delete chat* also clears the copy in the session cookie, since the cookie is signed but not encrypted. |
+| Shared devices | Chats are saved in `sessionStorage` (cleared when the tab closes) unless the visitor opts in to remembering, and remembered chats expire 30 days after their last message. The site sets no cookies, so deleting a chat on the device leaves nothing behind except the anonymized log. |
 | Encryption in transit | In production, plain-HTTP requests are redirected to HTTPS (`308` for `POST`, so messages aren't silently dropped), and an `HSTS` header tells browsers to use HTTPS for the site from then on. |
-| Cross-site attacks | A strict Content-Security-Policy (no inline scripts), `SameSite=Lax`, `HttpOnly` and `Secure` cookies, and `X-Frame-Options: DENY`. State-changing endpoints require JSON or the `DELETE` method, which a cross-site form can't send. |
+| Cross-site attacks | A strict Content-Security-Policy (no inline scripts or styles), `X-Frame-Options: DENY`, and no cookies to steal or ride on. All user-supplied text, including people's names, is rendered with `textContent`, never as HTML. |
 | Cost and availability | Per-call timeouts keep both OpenAI calls within Heroku's 30-second limit, automatic retries are off, and a moving-window rate limit caps usage per visitor and globally. |
 | Crisis situations | Both prompts treat safety as overriding the topic rule: the classifier always lets these messages through, and the reply model is instructed to share emergency, 988 and domestic-violence resources. |
 
@@ -140,7 +144,7 @@ The `Procfile` runs migrations on release and serves the app with gunicorn. Set 
 | Variable | Required | Purpose |
 |---|---|---|
 | `OPENAI_API` | Yes | OpenAI API key |
-| `SECRET_KEY` | Yes | Signs session cookies (use a long random value) |
+| `SECRET_KEY` | Yes | Signs history tokens (use a long random value; changing it makes the AI forget existing chats) |
 | `DATABASE_URL` | Set automatically by Heroku Postgres | Database connection (`PG_URI` overrides it if set) |
 | `REDIS_URL` | Set automatically by Heroku Key-Value Store | Shares rate-limit counts across workers |
 | `OPENAI_MODEL`, `OPENAI_FILTER_MODEL` | No | Override the reply and classifier models |

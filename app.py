@@ -9,11 +9,12 @@ import re
 import secrets
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, render_template, request, session
+from flask import Flask, jsonify, redirect, render_template, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 from openai import OpenAI
 from sqlalchemy.exc import IntegrityError
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -39,22 +40,22 @@ OPENAI_FILTER_MODEL = os.environ.get("OPENAI_FILTER_MODEL", OPENAI_MODEL)
 FILTER_TIMEOUT = float(os.environ.get("OPENAI_FILTER_TIMEOUT", "8"))
 REPLY_TIMEOUT = float(os.environ.get("OPENAI_REPLY_TIMEOUT", "18"))
 
-# Limits that bound OpenAI cost per request and keep the session cookie under the browser's 4KB limit
+# Limits that bound OpenAI cost per request
 MAX_MESSAGE_LENGTH = 1000
 MAX_HISTORY_MESSAGES = 6
-# Browsers reject cookies over ~4KB, which silently erased the conversation history. History is
-# trimmed (oldest first) until the signed session cookie fits this budget.
-MAX_SESSION_COOKIE_BYTES = 3500
-# With "Remember this chat on this device" turned on, the session cookie (and the conversation saved
-# in the browser) lasts this many days after the last visit, instead of ending when the browser closes
+# The AI's memory of each chat travels with that chat as a signed "history token" (see below). It's
+# trimmed (oldest messages first) to fit this size, keeping requests well under MAX_CONTENT_LENGTH.
+MAX_HISTORY_TOKEN_BYTES = 8000
+# With "Remember my chats on this device" on, the browser keeps chats this many days after their last
+# message. History tokens stay valid a day longer, so a remembered chat never outlives the AI's memory.
 REMEMBER_DAYS = 30
-PREFERENCES_RATE_LIMIT = "30 per minute"
+HISTORY_TOKEN_MAX_AGE = datetime.timedelta(days=REMEMBER_DAYS + 1)
 
 # Column sizes for stored chat logs; longer messages are truncated before saving
 LOGGED_USER_MESSAGE_LENGTH = 255
 LOGGED_ASSISTANT_MESSAGE_LENGTH = 3000
 
-# Only these roles from the session history are ever sent to the model.
+# Only these roles from a chat's history are ever sent to the model.
 # Anything else (e.g. a forged "system"/"developer" message) is dropped.
 ALLOWED_HISTORY_ROLES = {"user", "assistant"}
 
@@ -195,8 +196,9 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 app.config["SQLALCHEMY_DATABASE_URI"] = database_uri()
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# The secret key signs the session cookie. Never fall back to a known value: anyone who knows it can
-# forge sessions. If SECRET_KEY isn't set, use a random key (sessions then reset when the app restarts).
+# The secret key signs history tokens (and the session cookie, if one is ever used). Never fall back to a
+# known value: anyone who knows it could forge them. If SECRET_KEY isn't set, a random key is used, and
+# the AI then forgets existing chats whenever the app restarts.
 app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 if not os.environ.get("SECRET_KEY"):
     app.logger.warning("SECRET_KEY is not set; using a random key. Set it as a config var.")
@@ -204,8 +206,6 @@ if not os.environ.get("SECRET_KEY"):
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = ENV != "dev"  # HTTPS-only cookies in production
-# Only applies once a visitor turns on "Remember this chat" (session.permanent); renewed on each visit
-app.config["PERMANENT_SESSION_LIFETIME"] = datetime.timedelta(days=REMEMBER_DAYS)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024  # Reject oversized request bodies
 
 limiter = Limiter(
@@ -365,34 +365,47 @@ class ChatLogger:
         self.db.session.commit()
 
 
-# ── Conversation history (stored in the signed session cookie) ──
+# ── Conversation history (signed history tokens) ──
+# Visitors can keep several chats, so the AI's memory can't live in one session cookie. Instead, each
+# reply comes with a "history token": the chat's recent messages, signed with SECRET_KEY. The browser
+# stores it with that chat and sends it back with the next message. The signature means a visitor can't
+# forge history (e.g. invent earlier assistant messages or a system prompt). LoveLab's servers keep no
+# conversation state at all, so deleting a chat on the device deletes the AI's memory of it.
 
-def load_history():
-    """Return the session's recent history, keeping only plain user/assistant text.
+history_signer = URLSafeTimedSerializer(app.secret_key, salt="lovelab-chat-history")
 
-    A tampered cookie therefore can't inject system/developer messages into the prompt.
+
+def load_history(token):
+    """Return the recent history from a history token, or [] if it's missing, tampered with or expired.
+
+    Only plain user/assistant text is kept, so even a validly signed token can't carry other roles.
     """
+    if not isinstance(token, str) or not token:
+        return []
+    try:
+        messages = history_signer.loads(token, max_age=HISTORY_TOKEN_MAX_AGE.total_seconds())
+    except BadSignature:  # Also covers SignatureExpired
+        return []
+    if not isinstance(messages, list):
+        return []
     return [
         {"role": m["role"], "content": m["content"]}
-        for m in session.get("messages", [])
+        for m in messages
         if isinstance(m, dict)
         and m.get("role") in ALLOWED_HISTORY_ROLES
         and isinstance(m.get("content"), str)
     ][-MAX_HISTORY_MESSAGES:]
 
 
-def save_history(history):
-    session["messages"] = fit_history_to_cookie(history[-MAX_HISTORY_MESSAGES:])
-
-
-def fit_history_to_cookie(history):
-    """Drop the oldest messages until the signed session cookie fits in MAX_SESSION_COOKIE_BYTES."""
-    serializer = app.session_interface.get_signing_serializer(app)
-    other_data = {k: v for k, v in session.items() if k != "messages"}
-    history = list(history)
-    while history and len(serializer.dumps({**other_data, "messages": history})) > MAX_SESSION_COOKIE_BYTES:
+def make_history_token(history):
+    """Sign the most recent messages, dropping the oldest until the token fits MAX_HISTORY_TOKEN_BYTES."""
+    history = list(history[-MAX_HISTORY_MESSAGES:])
+    while history:
+        token = history_signer.dumps(history)
+        if len(token) <= MAX_HISTORY_TOKEN_BYTES:
+            return token
         history.pop(0)
-    return history
+    return None
 
 
 if not os.environ.get("OPENAI_API"):
@@ -402,19 +415,19 @@ chat_assistant = ChatAssistant(os.environ["OPENAI_API"])
 chat_logger = ChatLogger(db)
 
 
-def respond_to(user_message):
-    """Get the assistant's reply and remember the exchange. Off-topic messages aren't remembered."""
-    history = load_history()
+def respond_to(user_message, history_token):
+    """Return (reply, new history token). Off-topic exchanges aren't added to the chat's history."""
+    history = load_history(history_token)
     previous_reply = next((m["content"] for m in reversed(history) if m["role"] == "assistant"), None)
 
     # Filter before calling the main model, saving unnecessary API calls
     if not chat_assistant.is_on_topic(user_message, previous_reply):
-        return random.choice(OFF_TOPIC_REPLIES)
+        return random.choice(OFF_TOPIC_REPLIES), make_history_token(history)
 
     conversation = history + [{"role": "user", "content": user_message}]
     assistant_message = chat_assistant.reply(conversation)
-    save_history(conversation + [{"role": "assistant", "content": assistant_message}])
-    return assistant_message
+    new_history = conversation + [{"role": "assistant", "content": assistant_message}]
+    return assistant_message, make_history_token(new_history)
 
 
 def log_exchange(user_message, assistant_message):
@@ -478,8 +491,8 @@ def rate_limited(_error):
 @limiter.shared_limit(GLOBAL_CHAT_RATE_LIMIT, scope="global-chat", key_func=lambda: "all-visitors", methods=["POST"])
 def home():
     if request.method == "GET":
-        # The browser redraws the visible conversation itself after a refresh, so the history is
-        # kept here. The welcome message is display-only: it isn't stored or sent to the model.
+        # The browser draws the visitor's saved chats itself. The welcome message is display-only:
+        # it isn't stored or sent to the model.
         return render_template(
             "index.html",
             messages=[{"role": "assistant", "content": WELCOME_MESSAGE}],
@@ -495,47 +508,15 @@ def home():
     if len(user_message) > MAX_MESSAGE_LENGTH:
         return jsonify({"message": TOO_LONG_REPLY}), 400
 
-    # The page sends this with the first message of a conversation it's showing (a new tab, or
-    # after "New chat"), so the model never remembers a conversation the user can no longer see
-    if data.get("new_conversation") is True:
-        session.pop("messages", None)
-
     try:
-        assistant_message = respond_to(user_message)
+        assistant_message, history_token = respond_to(user_message, data.get("history"))
     except Exception:
         # Log the full error (visible in Heroku logs) and give the user a friendly reply instead of a 500
         app.logger.exception("OpenAI request failed")
         return jsonify({"message": SERVICE_ERROR_REPLY}), 502
 
     log_exchange(user_message, assistant_message)
-    return jsonify({"message": assistant_message})
-
-
-@app.route("/preferences", methods=["POST"])
-@limiter.limit(PREFERENCES_RATE_LIMIT)
-def preferences():
-    """Turn "Remember this chat on this device" on or off.
-
-    On, the session cookie (which holds the AI's memory of the conversation) lasts REMEMBER_DAYS;
-    off, it ends when the browser closes. The browser keeps its own copy of the visible conversation.
-    """
-    data = request.get_json(silent=True) or {}
-    remember = data.get("remember")
-    if not isinstance(remember, bool):
-        return jsonify({"message": "Please send remember as true or false."}), 400
-    session.permanent = remember
-    return jsonify({"remember": remember})
-
-
-@app.route("/conversation", methods=["DELETE"])
-@limiter.limit(PREFERENCES_RATE_LIMIT)
-def delete_conversation():
-    """Erase the AI's memory of the conversation (the history in the session cookie) right away.
-
-    The "Remember this chat" setting is kept. Anonymized log copies are unaffected (see the Terms).
-    """
-    session.pop("messages", None)
-    return jsonify({"deleted": True})
+    return jsonify({"message": assistant_message, "history": history_token})
 
 
 @app.route("/about")

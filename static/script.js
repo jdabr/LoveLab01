@@ -1,4 +1,36 @@
-﻿// Manages the dark/light mode toggle and persists the user's preference
+﻿// ── Small helpers ──
+
+// Creates an element with an optional class and text (text is always set with textContent, never HTML)
+function createElement(tag, className = '', text = '') {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text) element.textContent = text;
+    return element;
+}
+
+function createButton(className, text, onClick) {
+    const button = createElement('button', className, text);
+    button.type = 'button';
+    if (onClick) button.addEventListener('click', onClick);
+    return button;
+}
+
+function newId() {
+    return window.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+// Returns localStorage/sessionStorage, or null when the browser blocks it (e.g. some private modes)
+function getStorage(name) {
+    try {
+        const storage = window[name];
+        storage.getItem('');
+        return storage;
+    } catch (e) { return null; }
+}
+
+// ── Theme ──
+
+// Manages the dark/light mode toggle and persists the user's preference
 class ThemeManager {
     constructor(toggleBtnId) {
         this.toggleBtn = document.getElementById(toggleBtnId);
@@ -6,9 +38,7 @@ class ThemeManager {
     }
 
     getSavedTheme() {
-        try {
-            return localStorage.getItem('theme');
-        } catch (e) { return null; /* Storage unavailable */ }
+        return getStorage('localStorage')?.getItem('theme') ?? null;
     }
 
     getPreferredTheme() {
@@ -25,9 +55,7 @@ class ThemeManager {
 
     toggle() {
         const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-        try {
-            localStorage.setItem('theme', next);
-        } catch (e) { /* Storage unavailable: the choice lasts for this page only */ }
+        getStorage('localStorage')?.setItem('theme', next);
         this.applyTheme(next);
     }
 
@@ -44,48 +72,138 @@ class ThemeManager {
     }
 }
 
-// Handles opening and closing the mobile navigation menu
-class MobileMenuManager {
-    constructor(hamburgerMenuId, mobileMenuId) {
-        this.hamburger = document.getElementById(hamburgerMenuId);
-        this.mobileMenu = document.getElementById(mobileMenuId);
+// ── Sidebar drawer (phones) ──
+
+// On narrow screens the sidebar slides in from the left when the menu button is pressed
+class SidebarDrawer {
+    constructor(sidebarId, toggleId, backdropId) {
+        this.sidebar = document.getElementById(sidebarId);
+        this.toggleButton = document.getElementById(toggleId);
+        this.backdrop = document.getElementById(backdropId);
     }
 
-    // Returns false if either element is missing, preventing errors on pages without a menu
-    isAvailable() {
-        return this.hamburger !== null && this.mobileMenu !== null;
+    isOpen() {
+        return this.sidebar.classList.contains('open');
     }
 
-    toggle(e) {
-        e.stopPropagation();
-        this.mobileMenu.classList.toggle('active');
+    open() {
+        this.sidebar.classList.add('open');
+        this.backdrop.hidden = false;
+        this.toggleButton.setAttribute('aria-expanded', 'true');
     }
 
-    closeIfOutside(e) {
-        if (!this.hamburger.contains(e.target) && !this.mobileMenu.contains(e.target)) {
-            this.mobileMenu.classList.remove('active');
-        }
+    close() {
+        if (!this.isOpen()) return;
+        this.sidebar.classList.remove('open');
+        this.backdrop.hidden = true;
+        this.toggleButton.setAttribute('aria-expanded', 'false');
     }
 
     init() {
-        if (!this.isAvailable()) return;
-        this.hamburger.addEventListener('click', (e) => this.toggle(e));
-        // Keyboard support: Enter or Space opens/closes the menu
-        this.hamburger.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.toggle(e); }
-        });
-        document.addEventListener('click', (e) => this.closeIfOutside(e));
+        if (!this.sidebar || !this.toggleButton || !this.backdrop) return;
+        this.toggleButton.addEventListener('click', () => (this.isOpen() ? this.close() : this.open()));
+        this.backdrop.addEventListener('click', () => this.close());
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.close(); });
     }
 }
 
-function createButton(className, text, onClick) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = className;
-    button.textContent = text;
-    button.addEventListener('click', onClick);
-    return button;
+// ── Dialogs ──
+
+// In-page dialogs (styled like the rest of the site) instead of the browser's confirm()/alert() pop-ups
+class Modal {
+    static current = null;
+    static count = 0;
+
+    // actions: [{ label, kind: 'primary' | 'secondary' | 'danger', onClick(dialog) }]. Without onClick,
+    // an action just closes the dialog. Returns { body, close(result) }; onClose(result) runs on close.
+    static open({ title, content = null, actions = [], onClose = null, className = '' }) {
+        Modal.current?.close();
+        const previousFocus = document.activeElement;
+        const titleId = `modal-title-${++Modal.count}`;
+
+        const overlay = createElement('div', 'modal');
+        const box = createElement('div', `modal-content ${className}`.trim());
+        box.setAttribute('role', 'dialog');
+        box.setAttribute('aria-modal', 'true');
+        box.setAttribute('aria-labelledby', titleId);
+
+        const header = createElement('div', 'modal-header');
+        const heading = createElement('h2', '', title);
+        heading.id = titleId;
+        const closeButton = createButton('close-button', '×');
+        closeButton.setAttribute('aria-label', 'Close');
+        header.append(heading, closeButton);
+
+        const body = createElement('div', 'modal-body');
+        if (content) body.append(content);
+        box.append(header, body);
+
+        let closed = false;
+        const onKeydown = (e) => { if (e.key === 'Escape') dialog.close(); };
+        const dialog = {
+            body,
+            close(result) {
+                if (closed) return;
+                closed = true;
+                overlay.remove();
+                document.removeEventListener('keydown', onKeydown);
+                if (Modal.current === dialog) Modal.current = null;
+                previousFocus?.focus?.();
+                onClose?.(result);
+            },
+        };
+
+        let focusTarget = closeButton;
+        if (actions.length) {
+            const footer = createElement('div', 'modal-footer');
+            actions.forEach(({ label, kind = 'secondary', onClick }) => {
+                const button = createButton(`modal-button ${kind}`, label,
+                    () => (onClick ? onClick(dialog) : dialog.close()));
+                footer.append(button);
+                if (kind !== 'secondary') focusTarget = button;
+            });
+            box.append(footer);
+        }
+
+        closeButton.addEventListener('click', () => dialog.close());
+        // Clicking the dimmed backdrop (outside the box) closes the dialog
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) dialog.close(); });
+        document.addEventListener('keydown', onKeydown);
+        overlay.append(box);
+        document.body.append(overlay);
+        Modal.current = dialog;
+        (body.querySelector('[autofocus]') || focusTarget).focus();
+        return dialog;
+    }
+
+    // Resolves true if the visitor confirms, false if they cancel or close the dialog
+    static confirm({ title, message, confirmLabel = 'OK', danger = false }) {
+        return new Promise(resolve => {
+            Modal.open({
+                title,
+                content: createElement('p', 'modal-message', message),
+                actions: [
+                    { label: 'Cancel' },
+                    { label: confirmLabel, kind: danger ? 'danger' : 'primary', onClick: d => d.close(true) },
+                ],
+                onClose: result => resolve(result === true),
+            });
+        });
+    }
+
+    static alert({ title, message }) {
+        return new Promise(resolve => {
+            Modal.open({
+                title,
+                content: createElement('p', 'modal-message', message),
+                actions: [{ label: 'OK', kind: 'primary' }],
+                onClose: () => resolve(),
+            });
+        });
+    }
 }
+
+// ── Terms ──
 
 // Handles the terms and conditions agreement and modal
 class TermsManager {
@@ -97,64 +215,24 @@ class TermsManager {
         this.termsButton = document.getElementById(termsButtonId);
         this.termsCheckbox = document.getElementById(termsCheckboxId);
         this.termsLabel = document.querySelector('label[for="terms"]');
-        this.modal = null;
-        this.onAgree = null;
-        this.onKeydown = (e) => { if (e.key === 'Escape') this.closeModal(); };
     }
 
-    // Opens the terms in a modal. onAgree (optional) runs after the visitor clicks "I agree".
+    // Opens the terms in a dialog. onAgree (optional) runs after the visitor clicks "I agree".
     showModal(onAgree = null) {
-        if (this.modal) return;  // Already open
-        this.onAgree = onAgree;
-        this.previousFocus = document.activeElement;
-
-        const { modal, body, focusTarget } = this.buildModal();
-        document.body.appendChild(modal);
-        document.addEventListener('keydown', this.onKeydown);
-        this.modal = modal;
-        focusTarget.focus();
-
-        this.loadTerms(body);
-    }
-
-    // Builds the modal's elements; returns the backdrop, the body to fill, and the button to focus
-    buildModal() {
-        const modal = document.createElement('div');
-        modal.className = 'modal';
-        // Clicking the dimmed backdrop (outside the box) closes the modal
-        modal.addEventListener('click', (e) => { if (e.target === modal) this.closeModal(); });
-
-        const content = document.createElement('div');
-        content.className = 'modal-content';
-        content.setAttribute('role', 'dialog');
-        content.setAttribute('aria-modal', 'true');
-        content.setAttribute('aria-labelledby', 'terms-title');
-
-        const header = document.createElement('div');
-        header.className = 'modal-header';
-        const title = document.createElement('h2');
-        title.id = 'terms-title';
-        title.textContent = 'Terms and Conditions';
-        const closeButton = createButton('close-button', '×', () => this.closeModal());
-        closeButton.setAttribute('aria-label', 'Close');
-        header.append(title, closeButton);
-
-        const body = document.createElement('div');
-        body.className = 'modal-body';
-        body.textContent = 'Loading…';
-
-        const footer = document.createElement('div');
-        footer.className = 'modal-footer';
-        footer.appendChild(createButton('modal-button secondary', 'Close', () => this.closeModal()));
-        let agreeButton = null;
+        const actions = [{ label: 'Close' }];
         if (!this.isAgreed()) {
-            agreeButton = createButton('modal-button primary', "I'm 18+ and agree", () => this.agree());
-            footer.appendChild(agreeButton);
+            actions.push({
+                label: "I'm 18+ and agree",
+                kind: 'primary',
+                onClick: (dialog) => {
+                    this.agree();
+                    dialog.close();
+                    onAgree?.();
+                },
+            });
         }
-
-        content.append(header, body, footer);
-        modal.appendChild(content);
-        return { modal, body, focusTarget: agreeButton || closeButton };
+        const dialog = Modal.open({ title: 'Terms and Conditions', content: createElement('p', '', 'Loading…'), actions });
+        this.loadTerms(dialog.body);
     }
 
     loadTerms(body) {
@@ -175,65 +253,38 @@ class TermsManager {
         container.textContent = '';
         let list = null;
         text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).forEach((line, index) => {
-            let el;
             if (line.startsWith('- ')) {
-                if (!list) {
-                    list = document.createElement('ul');
-                    container.appendChild(list);
-                }
-                el = document.createElement('li');
-                el.textContent = line.slice(2);
-                list.appendChild(el);
+                if (!list) list = container.appendChild(createElement('ul'));
+                list.append(createElement('li', '', line.slice(2)));
                 return;
             }
             list = null;
-            if (index === 0) {
-                el = document.createElement('h3');  // Document title
-            } else if (/^\d+\.\s/.test(line)) {
-                el = document.createElement('h4');  // Numbered section heading
-            } else {
-                el = document.createElement('p');
-                if (/^Last updated:/.test(line)) el.className = 'terms-updated';
-            }
-            el.textContent = line;
-            container.appendChild(el);
+            let tag = 'p';
+            if (index === 0) tag = 'h3';  // Document title
+            else if (/^\d+\.\s/.test(line)) tag = 'h4';  // Numbered section heading
+            const element = createElement(tag, /^Last updated:/.test(line) ? 'terms-updated' : '', line);
+            container.append(element);
         });
     }
 
-    closeModal() {
-        if (!this.modal) return;
-        this.modal.remove();
-        this.modal = null;
-        this.onAgree = null;
-        document.removeEventListener('keydown', this.onKeydown);
-        this.previousFocus?.focus?.();
-    }
-
     agree() {
-        const callback = this.onAgree;
         this.termsCheckbox.checked = true;
         this.handleAgreement();
-        this.closeModal();
-        if (callback) callback();
     }
 
     // Hides the checkbox and label once the user agrees, and remembers it on this device
     handleAgreement() {
         if (!this.termsCheckbox.checked) return;
-        this.termsCheckbox.style.display = 'none';
-        if (this.termsLabel) this.termsLabel.style.display = 'none';
-        try {
-            localStorage.setItem(TermsManager.STORAGE_KEY, TermsManager.TERMS_VERSION);
-        } catch (e) { /* Storage unavailable (e.g. private mode): agreement lasts for this page only */ }
+        this.termsCheckbox.hidden = true;
+        if (this.termsLabel) this.termsLabel.hidden = true;
+        // If storage is unavailable (e.g. private mode), the agreement lasts for this page only
+        getStorage('localStorage')?.setItem(TermsManager.STORAGE_KEY, TermsManager.TERMS_VERSION);
     }
 
     restoreAgreement() {
-        try {
-            if (localStorage.getItem(TermsManager.STORAGE_KEY) === TermsManager.TERMS_VERSION) {
-                this.termsCheckbox.checked = true;
-                this.handleAgreement();
-            }
-        } catch (e) { /* Storage unavailable */ }
+        if (getStorage('localStorage')?.getItem(TermsManager.STORAGE_KEY) === TermsManager.TERMS_VERSION) {
+            this.agree();
+        }
     }
 
     isAgreed() {
@@ -247,116 +298,199 @@ class TermsManager {
     }
 }
 
+// ── Server ──
+
 // Handles communication with the Flask backend
 class Server {
-    // newConversation tells the server to forget any earlier history before replying
-    postMessage(message, newConversation) {
+    // history is the chat's signed history token (or null for a new chat). Resolves to
+    // { message, history }: the reply and the chat's updated history token. Rejects on errors; when
+    // the server explains the problem (e.g. too many messages), error.userMessage holds its explanation.
+    postMessage(message, history) {
         return fetch('/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, new_conversation: newConversation }),
-        })
-            .then(response => response.json()
-                // Non-JSON responses (e.g. an HTML error page) become a readable error
-                .catch(() => { throw new Error(`Server error (${response.status})`); }))
+            body: JSON.stringify({ message, history }),
+        }).then(response => response.json()
+            .catch(() => null)  // Non-JSON responses (e.g. an HTML error page)
             .then(data => {
-                if (!data || typeof data.message !== 'string') throw new Error('Invalid server response');
-                return data.message;
-            });
-    }
-
-    // Erases the AI's memory of the conversation on the server right away
-    deleteConversation() {
-        return fetch('/conversation', { method: 'DELETE' }).then(response => {
-            if (!response.ok) throw new Error(`Server error (${response.status})`);
-        });
-    }
-
-    // Tells the server whether to keep the AI's memory of the conversation after the browser closes
-    setRemember(remember) {
-        return fetch('/preferences', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ remember }),
-        }).then(response => {
-            if (!response.ok) throw new Error(`Server error (${response.status})`);
-        });
+                if (!data || typeof data.message !== 'string') throw new Error(`Server error (${response.status})`);
+                if (!response.ok) throw Object.assign(new Error(data.message), { userMessage: data.message });
+                return { message: data.message, history: typeof data.history === 'string' ? data.history : null };
+            }));
     }
 }
 
-// Saves the visible conversation in the browser so it can be shown again later.
-// - By default it uses sessionStorage: it survives a refresh but is erased when the tab closes,
+// ── Saved chats ──
+
+// The visitor's chats and the people they're about, saved only in this browser.
+// - By default everything is in sessionStorage: it survives a refresh but is erased when the tab closes,
 //   so conversations don't linger on shared devices.
-// - With "Remember this chat on this device" on, it uses localStorage instead, so it also survives
-//   closing the browser or restarting the computer, and expires after rememberDays without a new message.
-class ConversationStore {
-    static KEY = 'lovelab.conversation';
+// - With "Remember my chats on this device" on, it's in localStorage instead, so it also survives
+//   closing the browser. Chats are then deleted rememberDays after their last message, and people
+//   with no chats left are deleted rememberDays after they were last used.
+// Each chat also holds its signed history token: the AI's memory of that chat (see app.py).
+class ChatLibrary {
+    static KEY = 'lovelab.chats';
     static REMEMBER_KEY = 'lovelab.remember';
+    static LEGACY_KEY = 'lovelab.conversation';  // Single-conversation format used before multiple chats
+    static MAX_CHATS = 100;
     static MAX_MESSAGES = 200;
+    static TITLE_LENGTH = 48;
 
     constructor(rememberDays) {
         this.maxAgeMs = rememberDays * 24 * 60 * 60 * 1000;
+        for (const name of ['sessionStorage', 'localStorage']) getStorage(name)?.removeItem(ChatLibrary.LEGACY_KEY);
+        this.data = this.read();
+        this.pruneExpired();
     }
 
+    // ── Storage ──
+
     isRemembered() {
-        try {
-            return localStorage.getItem(ConversationStore.REMEMBER_KEY) === 'on';
-        } catch (e) { return false; /* Storage unavailable */ }
+        return getStorage('localStorage')?.getItem(ChatLibrary.REMEMBER_KEY) === 'on';
     }
 
     storage() {
-        return this.isRemembered() ? localStorage : sessionStorage;
+        return getStorage(this.isRemembered() ? 'localStorage' : 'sessionStorage');
     }
 
-    load() {
+    read() {
+        const empty = { people: [], chats: [], activeChatId: null };
         try {
-            const saved = JSON.parse(this.storage().getItem(ConversationStore.KEY));
-            if (!saved || !Array.isArray(saved.messages)) return [];
-            if (this.isRemembered() && Date.now() - saved.savedAt > this.maxAgeMs) {
-                this.clear();  // Expired
-                return [];
-            }
-            return saved.messages.filter(m =>
-                m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
-        } catch (e) { return []; /* Storage unavailable or corrupted */ }
+            const saved = JSON.parse(this.storage()?.getItem(ChatLibrary.KEY) ?? 'null');
+            if (!saved || !Array.isArray(saved.people) || !Array.isArray(saved.chats)) return empty;
+            const people = saved.people.filter(p => p && typeof p.id === 'string' && typeof p.name === 'string');
+            const personIds = new Set(people.map(p => p.id));
+            const chats = saved.chats
+                .filter(c => c && typeof c.id === 'string' && Array.isArray(c.messages))
+                .map(c => ({
+                    ...c,
+                    personId: personIds.has(c.personId) ? c.personId : null,
+                    messages: c.messages.filter(m =>
+                        m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string'),
+                }));
+            return { people, chats, activeChatId: typeof saved.activeChatId === 'string' ? saved.activeChatId : null };
+        } catch (e) { return empty; /* Corrupted */ }
     }
 
-    save(messages) {
+    persist() {
         try {
-            const saved = { savedAt: Date.now(), messages: messages.slice(-ConversationStore.MAX_MESSAGES) };
-            this.storage().setItem(ConversationStore.KEY, JSON.stringify(saved));
-        } catch (e) { /* Storage unavailable or full: the conversation just won't be restored */ }
+            this.storage()?.setItem(ChatLibrary.KEY, JSON.stringify(this.data));
+        } catch (e) { /* Storage full: the chats just won't be restored */ }
     }
 
-    add(role, content) {
-        this.save([...this.load(), { role, content }]);
+    pruneExpired() {
+        if (!this.isRemembered()) return;
+        const cutoff = Date.now() - this.maxAgeMs;
+        this.data.chats = this.data.chats.filter(c => c.updatedAt > cutoff);
+        const inUse = new Set(this.data.chats.map(c => c.personId));
+        this.data.people = this.data.people.filter(p => inUse.has(p.id) || p.updatedAt > cutoff);
+        this.persist();
     }
 
-    // Deletes the saved conversation from both kinds of storage
-    clear() {
-        for (const storage of ['sessionStorage', 'localStorage']) {
-            try {
-                window[storage].removeItem(ConversationStore.KEY);
-            } catch (e) { /* Storage unavailable */ }
-        }
-    }
-
-    // Moves the current conversation to the storage that matches the new setting
+    // Moves everything to the storage that matches the new setting
     setRemembered(remember) {
-        const messages = this.load();
-        this.clear();
-        try {
-            if (remember) localStorage.setItem(ConversationStore.REMEMBER_KEY, 'on');
-            else localStorage.removeItem(ConversationStore.REMEMBER_KEY);
-        } catch (e) { /* Storage unavailable */ }
-        if (messages.length) this.save(messages);
+        for (const name of ['sessionStorage', 'localStorage']) getStorage(name)?.removeItem(ChatLibrary.KEY);
+        const local = getStorage('localStorage');
+        if (remember) local?.setItem(ChatLibrary.REMEMBER_KEY, 'on');
+        else local?.removeItem(ChatLibrary.REMEMBER_KEY);
+        this.persist();
     }
 
-    // True once the server has replied in this conversation, so it holds matching history
-    hasServerReply() {
-        return this.load().some(m => m.role === 'assistant');
+    // ── People ──
+
+    getPerson(id) {
+        return this.data.people.find(p => p.id === id) ?? null;
+    }
+
+    addPerson(name, relationship) {
+        const person = { id: newId(), name, relationship, updatedAt: Date.now() };
+        this.data.people.push(person);
+        this.persist();
+        return person;
+    }
+
+    updatePerson(id, name, relationship) {
+        Object.assign(this.getPerson(id) ?? {}, { name, relationship, updatedAt: Date.now() });
+        this.persist();
+    }
+
+    // Deletes the person and every chat about them
+    deletePerson(id) {
+        this.data.people = this.data.people.filter(p => p.id !== id);
+        this.data.chats = this.data.chats.filter(c => c.personId !== id);
+        this.persist();
+    }
+
+    chatsAbout(personId) {
+        return this.data.chats.filter(c => c.personId === personId);
+    }
+
+    // ── Chats ──
+
+    getChat(id) {
+        return this.data.chats.find(c => c.id === id) ?? null;
+    }
+
+    createChat(personId) {
+        const now = Date.now();
+        const chat = { id: newId(), personId, title: '', messages: [], history: null, createdAt: now, updatedAt: now };
+        this.data.chats.push(chat);
+        // Keep the newest chats if the limit is reached
+        this.data.chats = this.data.chats.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, ChatLibrary.MAX_CHATS);
+        this.persist();
+        return chat;
+    }
+
+    addMessage(chatId, role, content) {
+        const chat = this.getChat(chatId);
+        if (!chat) return;
+        chat.messages = [...chat.messages, { role, content }].slice(-ChatLibrary.MAX_MESSAGES);
+        if (!chat.title && role === 'user') chat.title = ChatLibrary.titleFrom(content);
+        chat.updatedAt = Date.now();
+        const person = this.getPerson(chat.personId);
+        if (person) person.updatedAt = chat.updatedAt;
+        this.persist();
+    }
+
+    setHistory(chatId, history) {
+        const chat = this.getChat(chatId);
+        if (!chat) return;
+        chat.history = history;
+        this.persist();
+    }
+
+    deleteChat(id) {
+        this.data.chats = this.data.chats.filter(c => c.id !== id);
+        if (this.data.activeChatId === id) this.data.activeChatId = null;
+        this.persist();
+    }
+
+    setActive(chatId) {
+        this.data.activeChatId = chatId;
+        this.persist();
+    }
+
+    static titleFrom(text) {
+        const clean = text.replace(/\s+/g, ' ').trim();
+        return clean.length > ChatLibrary.TITLE_LENGTH ? `${clean.slice(0, ChatLibrary.TITLE_LENGTH - 1)}…` : clean;
+    }
+
+    // People (and "General" for chats not about anyone), most recently active first, each with their
+    // chats, newest first. People without chats are included so they can be picked; General only if used.
+    groups() {
+        const byRecent = (a, b) => b.updatedAt - a.updatedAt;
+        const groups = this.data.people.map(person => {
+            const chats = this.chatsAbout(person.id).sort(byRecent);
+            return { person, chats, updatedAt: Math.max(person.updatedAt, ...chats.map(c => c.updatedAt)) };
+        });
+        const general = this.chatsAbout(null).sort(byRecent);
+        if (general.length) groups.push({ person: null, chats: general, updatedAt: general[0].updatedAt });
+        return groups.sort(byRecent);
     }
 }
+
+// ── Messages ──
 
 // Represents a single chat message and renders it in the chat container
 class Message {
@@ -366,10 +500,9 @@ class Message {
     }
 
     createElement() {
-        const el = document.createElement('div');
-        el.className = `message ${this.role === 'user' ? 'user-message' : 'assistant-message'}`;
-        el.innerText = this.content;
-        return el;
+        const element = createElement('div', `message ${this.role === 'user' ? 'user-message' : 'assistant-message'}`);
+        element.innerText = this.content;  // innerText keeps the reply's line breaks
+        return element;
     }
 
     // Adds the message to the container and scrolls so it's visible
@@ -386,43 +519,98 @@ class ThinkingMessage extends Message {
     }
 
     createElement() {
-        const el = document.createElement('div');
-        el.className = 'message assistant-message thinking-message';
-        el.id = 'thinking-message';
-        for (let i = 0; i < 3; i++) {
-            const dot = document.createElement('span');
-            dot.className = 'dot';
-            el.appendChild(dot);
-        }
-        return el;
+        const element = createElement('div', 'message assistant-message thinking-message');
+        element.id = 'thinking-message';
+        element.setAttribute('aria-label', 'LoveLab is typing');
+        for (let i = 0; i < 3; i++) element.append(createElement('span', 'dot'));
+        return element;
     }
 }
 
-// Controls the main chat interface — delegates responsibilities to focused managers
+// ── People ──
+
+const RELATIONSHIPS = ['Partner', 'Dating', 'Ex', 'Family', 'Friend', 'Coworker', 'Other'];
+const MAX_NAME_LENGTH = 40;
+
+// A round badge with the person's initial, coloured consistently from their id
+function createAvatar(person) {
+    const avatar = createElement('span', 'person-avatar', person ? person.name.trim().charAt(0).toUpperCase() : '✦');
+    avatar.setAttribute('aria-hidden', 'true');
+    if (person) {
+        const hash = [...person.id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7);
+        // Stepping by the golden angle spreads even near-identical ids far apart on the colour wheel
+        const hue = Math.round((hash * 137.508) % 360);
+        avatar.style.setProperty('--avatar-hue', hue);  // CSSOM is allowed by the Content-Security-Policy
+    } else {
+        avatar.classList.add('general');
+    }
+    return avatar;
+}
+
+function personLabel(person) {
+    return person.relationship ? `${person.name} · ${person.relationship}` : person.name;
+}
+
+// The name + relationship form used to add or edit a person. onSubmit({ name, relationship }).
+function createPersonForm({ person = null, submitLabel, onSubmit }) {
+    const form = createElement('form', 'person-form');
+
+    const nameLabel = createElement('label', 'field');
+    nameLabel.append(createElement('span', 'field-label', 'Name or nickname'));
+    const nameInput = createElement('input');
+    Object.assign(nameInput, { type: 'text', maxLength: MAX_NAME_LENGTH, required: true, autocomplete: 'off' });
+    nameInput.placeholder = 'e.g. Sarah, Mom, my boss';
+    nameInput.value = person?.name ?? '';
+    nameLabel.append(nameInput);
+
+    const relationshipLabel = createElement('label', 'field');
+    relationshipLabel.append(createElement('span', 'field-label', 'Relationship'));
+    const select = createElement('select');
+    RELATIONSHIPS.forEach(r => select.append(new Option(r, r, false, r === (person?.relationship ?? 'Partner'))));
+    relationshipLabel.append(select);
+
+    const submit = createElement('button', 'modal-button primary', submitLabel);
+    submit.type = 'submit';
+
+    form.append(nameLabel, relationshipLabel, submit);
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const name = nameInput.value.replace(/\s+/g, ' ').trim();
+        if (!name) { nameInput.focus(); return; }
+        onSubmit({ name, relationship: select.value });
+    });
+    return { form, nameInput };
+}
+
+// ── Chat app ──
+
+// Controls the chat page: the conversation, the chat list in the sidebar, and the header buttons.
+// The current chat is { chatId, personId }; chatId is null for a new chat that has no messages yet.
 class ChatApp {
-    constructor() {
+    constructor(drawer) {
+        this.drawer = drawer;
         this.messageContainer = document.getElementById('message-container');
         this.form = document.getElementById('chat-form');
         this.inputMessage = document.getElementById('input-message');
-        this.termsManager = new TermsManager('terms-button', 'terms');
         this.sendButton = this.form.querySelector('[type="submit"]');
+        this.headerTitle = document.getElementById('header-title');
         this.newChatButton = document.getElementById('new-chat');
         this.deleteChatButton = document.getElementById('delete-chat');
+        this.chatList = document.getElementById('chat-list');
+        this.addPersonButton = document.getElementById('add-person');
         this.rememberSwitch = document.getElementById('remember-chat');
         this.rememberNote = document.getElementById('remember-note');
+        this.termsManager = new TermsManager('terms-button', 'terms');
         this.server = new Server();
-        this.store = new ConversationStore(Number(this.form.dataset.rememberDays) || 30);
-        this.isWaiting = false;
+        this.library = new ChatLibrary(Number(this.form.dataset.rememberDays) || 30);
+        this.current = { chatId: null, personId: null };
+        this.pendingChatId = null;  // The chat waiting for a reply, if any
     }
 
-    handleSubmit(e) {
-        e.preventDefault();
-        this.send();
-    }
+    // ── Sending ──
 
     send() {
-        if (this.isWaiting) return;  // One message at a time
-
+        if (this.pendingChatId) return;  // One message at a time
         const userMessage = this.inputMessage.value.trim();
         if (!userMessage) return;
 
@@ -432,42 +620,53 @@ class ChatApp {
             return;
         }
 
-        const newConversation = !this.store.hasServerReply();
-        this.addMessage('user', userMessage);
-        this.store.add('user', userMessage);
-        this.updateDeleteButton();
-        this.showThinking();
-        this.inputMessage.value = '';
-        this.setWaiting(true);
+        if (!this.current.chatId) {
+            const chat = this.library.createChat(this.current.personId);
+            this.current.chatId = chat.id;
+            this.library.setActive(chat.id);
+        }
+        const chatId = this.current.chatId;
+        const chat = this.library.getChat(chatId);
 
-        this.server.postMessage(userMessage, newConversation)
-            .then(response => {
-                this.hideThinking();
-                this.addMessage('assistant', response);
-                this.store.add('assistant', response);
+        this.addMessage('user', userMessage);
+        this.library.addMessage(chatId, 'user', userMessage);
+        this.inputMessage.value = '';
+        this.setPending(chatId);
+        this.renderSidebar();
+
+        this.server.postMessage(userMessage, chat.history)
+            .then(({ message, history }) => {
+                this.library.addMessage(chatId, 'assistant', message);
+                this.library.setHistory(chatId, history);
+                if (this.current.chatId === chatId) {
+                    this.hideThinking();
+                    this.addMessage('assistant', message);
+                }
             })
             .catch(error => {
-                // Always clear the typing indicator so the chat never gets stuck
+                // Always clear the typing indicator so the chat never gets stuck. Errors are shown but
+                // not saved, so they don't reappear later or replace the chat's history.
                 console.error('Error:', error);
-                this.hideThinking();
-                this.addMessage('assistant', "Sorry, something went wrong on our end. Please try again in a moment.");
+                if (this.current.chatId === chatId) {
+                    this.hideThinking();
+                    this.addMessage('assistant', error.userMessage
+                        || 'Sorry, something went wrong on our end. Please try again in a moment.');
+                }
             })
             .finally(() => {
-                this.setWaiting(false);
+                this.setPending(null);
+                this.renderSidebar();
                 this.inputMessage.focus();
             });
     }
 
-    // Disables Send (and Delete chat) while a reply is pending so messages can't be double-sent
-    // and a reply can't arrive into a deleted chat; typing stays allowed
-    setWaiting(waiting) {
-        this.isWaiting = waiting;
-        if (this.sendButton) this.sendButton.disabled = waiting;
-        this.updateDeleteButton();
-    }
-
-    updateDeleteButton() {
-        if (this.deleteChatButton) this.deleteChatButton.disabled = this.isWaiting || !this.store.load().length;
+    // Disables Send (and Delete chat) while a reply is pending so messages can't be double-sent and a
+    // reply can't arrive into a deleted chat; typing and switching chats stay allowed
+    setPending(chatId) {
+        this.pendingChatId = chatId;
+        this.sendButton.disabled = Boolean(chatId);
+        if (chatId && chatId === this.current.chatId) this.showThinking();
+        this.updateHeader();
     }
 
     addMessage(role, content) {
@@ -475,93 +674,259 @@ class ChatApp {
     }
 
     showThinking() {
-        new ThinkingMessage().display(this.messageContainer);
+        if (!document.getElementById('thinking-message')) new ThinkingMessage().display(this.messageContainer);
     }
 
     hideThinking() {
         document.getElementById('thinking-message')?.remove();
     }
 
-    // Redraws the conversation saved before a refresh, below the welcome message
-    restoreConversation() {
-        this.store.load().forEach(({ role, content }) => this.addMessage(role, content));
-    }
+    // ── Switching chats ──
 
-    // Removes the saved conversation and every message except the welcome message (rendered first)
-    clearConversation() {
-        this.store.clear();
-        [...this.messageContainer.children].slice(1).forEach(el => el.remove());
+    // Shows a chat (or, with chatId null, a new empty chat about personId)
+    openChat(chatId, personId = null) {
+        const chat = chatId ? this.library.getChat(chatId) : null;
+        this.current = { chatId: chat?.id ?? null, personId: chat ? chat.personId : personId };
+        this.library.setActive(this.current.chatId);
+
+        // Keep only the welcome message, which the server renders first
+        [...this.messageContainer.children].slice(1).forEach(element => element.remove());
+        chat?.messages.forEach(({ role, content }) => this.addMessage(role, content));
+        if (chat && chat.id === this.pendingChatId) this.showThinking();
+
         this.inputMessage.value = '';
-        this.updateDeleteButton();
-        this.inputMessage.focus();
+        this.updateHeader();
+        this.renderSidebar();
+        this.drawer?.close();
+        this.focusInput();
     }
 
-    // Starts over; the server forgets the old conversation when the next message is sent
-    startNewChat() {
-        if (this.isWaiting) return;
-        if (this.store.load().length && !window.confirm('Start a new chat? This conversation will be cleared.')) return;
-        this.clearConversation();
+    // Opens a chat after choosing who it's about
+    async startNewChat() {
+        const choice = await this.choosePerson();
+        if (choice !== undefined) this.openChat(null, choice);
     }
 
-    // Erases the conversation from this device and the AI's memory right away
-    deleteChat() {
-        if (this.isWaiting || !this.store.load().length) return;
-        const confirmed = window.confirm(
-            'Delete this chat?\n\nIt will be erased from this device and from LoveLab\'s memory, and can\'t be '
-            + 'recovered. (Anonymous copies kept by LoveLab, described in the Terms, can\'t be deleted.)');
-        if (!confirmed) return;
-        this.deleteChatButton.disabled = true;
-        this.server.deleteConversation()
-            .then(() => this.clearConversation())
-            .catch(error => {
-                console.error('Error deleting chat:', error);
-                window.alert('Sorry, the chat couldn\'t be deleted. Please try again.');
-                this.updateDeleteButton();
+    // Resolves to a person id, null for "General", or undefined if the visitor cancels
+    choosePerson() {
+        return new Promise(resolve => {
+            let chosen;
+            const content = createElement('div', 'person-picker');
+            content.append(createElement('p', 'picker-hint',
+                'Chats about the same person are kept together. Names stay on this device; LoveLab isn\'t told who a chat is about.'));
+
+            const options = createElement('div', 'picker-options');
+            const pick = (personId) => { chosen = personId; dialog.close(); };
+            this.library.groups().filter(g => g.person).forEach(({ person }) => {
+                const option = createButton('picker-option', '', () => pick(person.id));
+                option.append(createAvatar(person), createElement('span', 'picker-option-label', personLabel(person)));
+                options.append(option);
             });
+            const general = createButton('picker-option', '', () => pick(null));
+            general.append(createAvatar(null), createElement('span', 'picker-option-label', 'General: not about anyone in particular'));
+            options.append(general);
+            content.append(options);
+
+            content.append(createElement('p', 'picker-divider', 'Or add someone new'));
+            const { form } = createPersonForm({
+                submitLabel: 'Add and start chat',
+                onSubmit: ({ name, relationship }) => pick(this.library.addPerson(name, relationship).id),
+            });
+            content.append(form);
+
+            const dialog = Modal.open({
+                title: 'Who is this chat about?',
+                content,
+                className: 'modal-narrow',
+                onClose: () => resolve(chosen),
+            });
+        });
+    }
+
+    addPerson() {
+        const { form, nameInput } = createPersonForm({
+            submitLabel: 'Add and start chat',
+            onSubmit: ({ name, relationship }) => {
+                const person = this.library.addPerson(name, relationship);
+                dialog.close();
+                this.openChat(null, person.id);
+            },
+        });
+        const dialog = Modal.open({ title: 'Add a person', content: form, className: 'modal-narrow' });
+        nameInput.focus();
+    }
+
+    editPerson(personId) {
+        const person = this.library.getPerson(personId);
+        if (!person) return;
+        const { form, nameInput } = createPersonForm({
+            person,
+            submitLabel: 'Save',
+            onSubmit: ({ name, relationship }) => {
+                this.library.updatePerson(personId, name, relationship);
+                dialog.close();
+                this.updateHeader();
+                this.renderSidebar();
+            },
+        });
+        const remove = createButton('text-button danger', `Delete ${person.name} and their chats`, () => {
+            dialog.close();
+            this.deletePerson(personId);
+        });
+        const content = createElement('div');
+        content.append(form, remove);
+        const dialog = Modal.open({ title: `Edit ${person.name}`, content, className: 'modal-narrow' });
+        nameInput.focus();
+    }
+
+    async deletePerson(personId) {
+        const person = this.library.getPerson(personId);
+        const chats = this.library.chatsAbout(personId);
+        if (!person) return;
+        if (chats.some(c => c.id === this.pendingChatId)) {
+            await Modal.alert({ title: 'Please wait', message: 'LoveLab is still replying in one of these chats.' });
+            return;
+        }
+        const count = chats.length === 1 ? '1 chat' : `${chats.length} chats`;
+        const confirmed = await Modal.confirm({
+            title: `Delete ${person.name}?`,
+            message: `${person.name} and ${count} about them will be erased from this device, along with LoveLab's memory of `
+                + 'those chats. This can\'t be undone. (Anonymous copies kept by LoveLab, described in the Terms, can\'t be deleted.)',
+            confirmLabel: 'Delete',
+            danger: true,
+        });
+        if (!confirmed) return;
+        const wasCurrent = this.current.personId === personId;
+        this.library.deletePerson(personId);
+        if (wasCurrent) this.openChat(null, null);
+        else this.renderSidebar();
+    }
+
+    async deleteChat(chatId = this.current.chatId) {
+        const chat = this.library.getChat(chatId);
+        if (!chat || chatId === this.pendingChatId) return;
+        const confirmed = await Modal.confirm({
+            title: 'Delete this chat?',
+            message: 'It will be erased from this device, along with LoveLab\'s memory of it, and can\'t be recovered. '
+                + '(Anonymous copies kept by LoveLab, described in the Terms, can\'t be deleted.)',
+            confirmLabel: 'Delete',
+            danger: true,
+        });
+        if (!confirmed) return;
+        this.library.deleteChat(chatId);
+        if (this.current.chatId === chatId) this.openChat(null, chat.personId);
+        else this.renderSidebar();
+    }
+
+    // ── Rendering ──
+
+    updateHeader() {
+        const person = this.library.getPerson(this.current.personId);
+        this.headerTitle.textContent = person ? personLabel(person) : 'LoveLab';
+        this.deleteChatButton.disabled = !this.current.chatId || this.current.chatId === this.pendingChatId;
+    }
+
+    renderSidebar() {
+        const groups = this.library.groups();
+        this.chatList.replaceChildren();
+        if (!groups.length) {
+            this.chatList.append(createElement('p', 'chat-list-empty',
+                'Your chats will appear here. Add the people in your life to keep chats about each of them together.'));
+            return;
+        }
+        groups.forEach(({ person, chats }) => this.chatList.append(this.renderGroup(person, chats)));
+    }
+
+    renderGroup(person, chats) {
+        const group = createElement('section', 'person-group');
+        const personId = person?.id ?? null;
+        const row = createElement('div', 'person-row');
+        if (personId === this.current.personId && !this.current.chatId) row.classList.add('active');
+
+        const label = createElement('span', 'person-label');
+        label.append(createElement('span', 'person-name', person ? person.name : 'General'));
+        if (person?.relationship) label.append(createElement('span', 'person-relationship', person.relationship));
+        row.append(createAvatar(person), label);
+
+        const name = person ? person.name : 'General';
+        const newChat = createButton('icon-button', '＋');
+        Object.assign(newChat.dataset, { action: 'new-chat', personId: personId ?? '' });
+        newChat.setAttribute('aria-label', `New chat about ${name}`);
+        newChat.title = 'New chat';
+        row.append(newChat);
+        if (person) {
+            const edit = createButton('icon-button', '⋯');
+            Object.assign(edit.dataset, { action: 'edit-person', personId });
+            edit.setAttribute('aria-label', `Edit ${name}`);
+            edit.title = 'Edit';
+            row.append(edit);
+        }
+        group.append(row);
+
+        if (chats.length) {
+            const list = createElement('ul', 'chat-items');
+            chats.forEach(chat => {
+                const item = createElement('li', `chat-item${chat.id === this.current.chatId ? ' active' : ''}`);
+                const open = createButton('chat-open', chat.title || 'New chat');
+                open.dataset.action = 'open-chat';
+                open.dataset.chatId = chat.id;
+                if (chat.id === this.current.chatId) open.setAttribute('aria-current', 'true');
+                const remove = createButton('icon-button chat-delete', '×');
+                Object.assign(remove.dataset, { action: 'delete-chat', chatId: chat.id });
+                remove.setAttribute('aria-label', `Delete chat "${chat.title}"`);
+                remove.title = 'Delete chat';
+                item.append(open, remove);
+                list.append(item);
+            });
+            group.append(list);
+        }
+        return group;
+    }
+
+    // One click handler for the whole chat list
+    handleChatListClick(e) {
+        const target = e.target.closest('[data-action]');
+        if (!target) return;
+        const { action, chatId, personId } = target.dataset;
+        if (action === 'open-chat') this.openChat(chatId);
+        else if (action === 'new-chat') this.openChat(null, personId || null);
+        else if (action === 'edit-person') this.editPerson(personId);
+        else if (action === 'delete-chat') this.deleteChat(chatId);
     }
 
     showRememberSetting(remember) {
-        if (this.rememberSwitch) this.rememberSwitch.checked = remember;
-        if (this.rememberNote) this.rememberNote.hidden = !remember;
+        this.rememberSwitch.checked = remember;
+        this.rememberNote.hidden = !remember;
     }
 
-    // The server is told first so the AI's memory and the saved conversation always last equally long;
-    // if that fails, the switch goes back to how it was
-    toggleRemember() {
-        const remember = this.rememberSwitch.checked;
-        this.rememberSwitch.disabled = true;
-        this.server.setRemember(remember)
-            .then(() => {
-                this.store.setRemembered(remember);
-                this.showRememberSetting(remember);
-            })
-            .catch(error => {
-                console.error('Error saving setting:', error);
-                this.showRememberSetting(!remember);
-            })
-            .finally(() => { this.rememberSwitch.disabled = false; });
+    // Focus the message box on desktop only; on phones it would pop the keyboard open
+    focusInput() {
+        if (window.matchMedia('(pointer: fine)').matches) this.inputMessage.focus();
     }
 
     init() {
-        this.form.addEventListener('submit', (e) => this.handleSubmit(e));
-        this.newChatButton?.addEventListener('click', () => this.startNewChat());
-        this.deleteChatButton?.addEventListener('click', () => this.deleteChat());
-        this.rememberSwitch?.addEventListener('change', () => this.toggleRemember());
+        this.form.addEventListener('submit', (e) => { e.preventDefault(); this.send(); });
+        this.newChatButton.addEventListener('click', () => this.startNewChat());
+        this.deleteChatButton.addEventListener('click', () => this.deleteChat());
+        this.addPersonButton.addEventListener('click', () => this.addPerson());
+        this.chatList.addEventListener('click', (e) => this.handleChatListClick(e));
+        this.rememberSwitch.addEventListener('change', () => {
+            this.library.setRemembered(this.rememberSwitch.checked);
+            this.showRememberSetting(this.rememberSwitch.checked);
+        });
         this.termsManager.init();
-        this.showRememberSetting(this.store.isRemembered());
-        this.restoreConversation();
-        this.updateDeleteButton();
-        // Focus the message box on desktop only; on phones it would pop the keyboard open on page load
-        if (window.matchMedia('(pointer: fine)').matches) this.inputMessage.focus();
+        this.showRememberSetting(this.library.isRemembered());
+        this.openChat(this.library.data.activeChatId);
     }
 }
 
 // ── Entry point ──
 document.addEventListener('DOMContentLoaded', () => {
     new ThemeManager('theme-toggle').init();
-    new MobileMenuManager('hamburger-menu', 'mobile-menu').init();
+    const drawer = new SidebarDrawer('sidebar', 'menu-button', 'sidebar-backdrop');
+    drawer.init();
 
     if (document.getElementById('chat-form')) {
-        new ChatApp().init();
+        new ChatApp(drawer).init();
     }
 });

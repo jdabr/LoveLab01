@@ -15,15 +15,24 @@ class TestHomePage:
         response = client.get("/")
         assert f'maxlength="{lovelab.MAX_MESSAGE_LENGTH}"'.encode() in response.data
 
-    def test_reloading_keeps_the_conversation(self, client):
-        with client.session_transaction() as sess:
-            sess["messages"] = [{"role": "user", "content": "old message"}]
-        client.get("/")
-        with client.session_transaction() as sess:
-            assert sess["messages"] == [{"role": "user", "content": "old message"}]
+    def test_has_chat_controls(self, client):
+        html = client.get("/").data.decode()
+        for element_id in ["new-chat", "delete-chat", "chat-list", "add-person", "remember-chat", "menu-button"]:
+            assert f'id="{element_id}"' in html
 
-    def test_has_new_chat_button(self, client):
-        assert b'id="new-chat"' in client.get("/").data
+    def test_remember_period_is_passed_to_the_page(self, client):
+        assert f'data-remember-days="{lovelab.REMEMBER_DAYS}"'.encode() in client.get("/").data
+
+
+def test_no_cookies_are_set(client, send):
+    # Chat history travels in signed history tokens, so LoveLab needs no cookies at all
+    assert "Set-Cookie" not in client.get("/").headers
+    assert "Set-Cookie" not in send("hello").headers
+
+
+@pytest.mark.parametrize("method, path", [("POST", "/preferences"), ("DELETE", "/conversation")])
+def test_old_cookie_endpoints_are_gone(client, method, path):
+    assert client.open(path, method=method).status_code in (404, 405)
 
 
 def test_about_page(client):

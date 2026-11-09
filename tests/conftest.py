@@ -73,7 +73,15 @@ def client(app):
 
 @pytest.fixture
 def send(client):
-    """Post a chat message and return the response."""
-    def _send(message, **kwargs):
-        return client.post("/", json={"message": message}, **kwargs)
+    """Post a message in one ongoing chat, the way the browser does: each reply's history token is sent
+    back with the next message. Pass history=<token> (or None, for a brand-new chat) to override that."""
+    chat = {"history": None}
+    use_current_chat = object()
+
+    def _send(message, history=use_current_chat, **kwargs):
+        token = chat["history"] if history is use_current_chat else history
+        response = client.post("/", json={"message": message, "history": token}, **kwargs)
+        if response.status_code == 200:
+            chat["history"] = response.json["history"]
+        return response
     return _send

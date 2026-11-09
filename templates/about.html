@@ -1,17 +1,151 @@
 ﻿{% extends "base.html" %}
 
-{% block title %}LoveLab - About{% endblock %}
+{% block title %}About LoveLab{% endblock %}
 {% block header %}About{% endblock %}
 
 {% block content %}
-        <div class="about-container">
-            <h2>What is LoveLab?</h2>
-            <p>LoveLab is a conversational AI assistant designed to help you...</p>
+        <main class="about-page">
+            <section class="about-hero">
+                <h1>A calm place to think through the relationships in your life</h1>
+                <p class="about-lead">
+                    LoveLab is an AI companion for questions about partners, family, friends and coworkers.
+                    Talk through what's happening, see it from another angle, and work out what to say next.
+                    No account, and no judgment.
+                </p>
+                <a class="about-cta" href="/">Start a chat</a>
+            </section>
 
-            <h2>How it works</h2>
-            <p>Simply type a message, agree to the terms and conditions, and LoveLab will respond...</p>
+            <section class="about-section" aria-labelledby="how-it-works">
+                <h2 id="how-it-works">How it works</h2>
+                <ol class="about-steps">
+                    <li>
+                        <h3>Say what's on your mind</h3>
+                        <p>Describe what's going on in your own words. The more detail you share, the more useful
+                        LoveLab's guidance can be.</p>
+                    </li>
+                    <li>
+                        <h3>Keep chats about each person together</h3>
+                        <p>Add the people in your life, like a partner, a parent or a coworker, and your chats about
+                        each of them stay grouped in one place on your device.</p>
+                    </li>
+                    <li>
+                        <h3>Get warm, practical guidance</h3>
+                        <p>LoveLab listens, reflects back what it hears, and suggests practical next steps, often
+                        with a question to help you think it through.</p>
+                    </li>
+                </ol>
 
-            <h2>Contact</h2>
-            <p>Have questions? Reach out at Hydrobusiness@outlook.com</p>
-        </div>
+                <div class="about-columns">
+                    <div class="about-card">
+                        <h3>Things you could ask</h3>
+                        <ul class="example-questions">
+                            <li>"My partner and I keep having the same argument. How do we break the cycle?"</li>
+                            <li>"How do I set boundaries with my mom without hurting her?"</li>
+                            <li>"A friend hasn't replied in weeks. Should I reach out?"</li>
+                            <li>"My coworker keeps taking credit for my work. How do I bring it up?"</li>
+                        </ul>
+                    </div>
+                    <div class="about-card">
+                        <h3>What LoveLab isn't</h3>
+                        <ul>
+                            <li>It's an AI, not a person. No human reads replies before you do.</li>
+                            <li>It's not therapy, or medical, legal or professional advice.</li>
+                            <li>It can be wrong. Use your own judgment for important decisions.</li>
+                            <li>It only discusses relationships, and always replies in English.</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <aside class="crisis-callout" aria-labelledby="crisis-heading">
+                <h2 id="crisis-heading">If you or someone else is in danger</h2>
+                <p>LoveLab isn't an emergency service. Call <strong>911</strong> (or your local emergency number).
+                In the U.S., call or text <strong>988</strong> for the Suicide &amp; Crisis Lifeline, or reach the
+                National Domestic Violence Hotline at <strong>1-800-799-7233</strong> (or text START to 88788).</p>
+            </aside>
+
+            <section class="about-section" aria-labelledby="privacy">
+                <h2 id="privacy">Privacy and safety</h2>
+                <div class="about-grid">
+                    <div class="about-card">
+                        <h3>No account, no names</h3>
+                        <p>LoveLab never asks who you are. There's nothing to sign up for.</p>
+                    </div>
+                    <div class="about-card">
+                        <h3>Your chats live on your device</h3>
+                        <p>Chats are saved in your browser and cleared when you close the tab, unless you turn on
+                        <em>Remember my chats</em>, which keeps them for 30 days. LoveLab's servers don't keep your
+                        chat history.</p>
+                    </div>
+                    <div class="about-card">
+                        <h3>People stay private</h3>
+                        <p>The names and relationships you add never leave your device. LoveLab isn't told who a
+                        chat is about.</p>
+                    </div>
+                    <div class="about-card">
+                        <h3>Delete anytime</h3>
+                        <p>Deleting a chat erases it from your device and wipes LoveLab's memory of it straight
+                        away.</p>
+                    </div>
+                    <div class="about-card">
+                        <h3>Anonymous records</h3>
+                        <p>To run and improve LoveLab, an anonymized copy of each message is kept, with emails, phone
+                        numbers and links removed, no IP address, and no way to link it to you.</p>
+                    </div>
+                    <div class="about-card">
+                        <h3>Safety comes first</h3>
+                        <p>Messages about danger, abuse or self-harm always get a response, along with crisis
+                        resources.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="about-section" aria-labelledby="faq">
+                <h2 id="faq">Frequently asked questions</h2>
+                <div class="faq">
+                    <details>
+                        <summary>Am I talking to a real person?</summary>
+                        <p>No. Replies are written by an AI model provided by OpenAI, and no human reviews them before
+                        you see them.</p>
+                    </details>
+                    <details>
+                        <summary>Can I come back to a chat later?</summary>
+                        <p>Yes, on the same device and browser. Chats stay while the tab is open, even if you refresh.
+                        Turn on <em>Remember my chats on this device</em> to keep them after closing your browser,
+                        for 30 days after each chat's last message. There are no accounts, so chats can't move to
+                        another device.</p>
+                    </details>
+                    <details>
+                        <summary>Who can see my messages?</summary>
+                        <p>Your messages are sent to OpenAI to write each reply. LoveLab's server sends them, so
+                        OpenAI doesn't get your IP address. LoveLab keeps anonymized copies (described above), which
+                        can't be traced back to you. If you turn on <em>Remember my chats</em>, anyone who uses your
+                        browser could open them, so leave it off on shared devices.</p>
+                    </details>
+                    <details>
+                        <summary>Does LoveLab know who the people in my chats are?</summary>
+                        <p>No. The names and relationships you add are only used to organize your chats on your
+                        device. If you mention someone's name in a message, it's sent along with the rest of that
+                        message, so you may prefer initials or a nickname.</p>
+                    </details>
+                    <details>
+                        <summary>Why did LoveLab decline my question?</summary>
+                        <p>LoveLab only discusses relationships and the people in your life. If your question was
+                        about something else, try asking how it affects someone you're close to.</p>
+                    </details>
+                    <details>
+                        <summary>How do I delete everything?</summary>
+                        <p>Delete chats one at a time, or delete a person to remove all their chats at once. Turning
+                        off <em>Remember my chats</em> means everything is cleared when you close the tab. Clearing
+                        your browser's data for this site also removes it all.</p>
+                    </details>
+                </div>
+            </section>
+
+            <section class="about-section about-contact" aria-labelledby="contact">
+                <h2 id="contact">Contact</h2>
+                <p>Questions or feedback? Email <a href="mailto:Hydrobusiness@outlook.com">Hydrobusiness@outlook.com</a>.
+                You can also read the full <a href="/static/TermsAndConditions.txt">Terms and Privacy Notice</a>.</p>
+            </section>
+        </main>
 {% endblock %}

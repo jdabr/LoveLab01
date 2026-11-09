@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}LoveLab{% endblock %}</title>
+    <meta name="description" content="LoveLab is an AI companion for the relationships in your life: partners, family, friends and coworkers. No account needed.">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <!-- Applies the saved theme before the page renders, so there's no flash of the wrong theme -->
     <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
@@ -11,42 +12,36 @@
 </head>
 <body>
 
-    <!-- Sidebar (desktop) -->
-    <aside class="sidebar">
-        <div class="sidebar-logo">LoveLab</div>
-        <nav>
+    <!-- Sidebar: always visible on desktop; slides in from the left on phones -->
+    <aside class="sidebar" id="sidebar" aria-label="Sidebar">
+        <a class="sidebar-logo" href="/">LoveLab</a>
+        <div class="sidebar-main">
+            {% block sidebar %}{% endblock %}
+        </div>
+        <nav class="sidebar-nav" aria-label="Site">
             <ul>
-                <li><a href="/">Home</a></li>
-                <li><a href="/about">About</a></li>
+                <li><a href="/" {% if request.path == '/' %}aria-current="page"{% endif %}>Chat</a></li>
+                <li><a href="/about" {% if request.path == '/about' %}aria-current="page"{% endif %}>About</a></li>
             </ul>
         </nav>
     </aside>
-
-    <!-- Menu (mobile) -->
-    <div class="mobile-menu" id="mobile-menu">
-        <div class="mobile-menu-content">
-            <ul>
-                <li><a href="/">Home</a></li>
-                <li><a href="/about">About</a></li>
-            </ul>
-        </div>
-    </div>
+    <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
 
     <div class="main-container">
-        <div class="chat-header">
-            <div class="hamburger" id="hamburger-menu" role="button" aria-label="Menu" tabindex="0">
-                <div class="hamburger-line"></div>
-                <div class="hamburger-line"></div>
-                <div class="hamburger-line"></div>
-            </div>
-            <span class="header-title">{% block header %}LoveLab{% endblock %}</span>
+        <header class="chat-header">
+            <button type="button" class="menu-button" id="menu-button" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">
+                <span class="menu-line"></span>
+                <span class="menu-line"></span>
+                <span class="menu-line"></span>
+            </button>
+            <span class="header-title" id="header-title">{% block header %}LoveLab{% endblock %}</span>
             <div class="header-actions">
                 {% block header_actions %}{% endblock %}
                 <button type="button" id="theme-toggle" class="header-button" aria-label="Switch to dark mode">
                     <span aria-hidden="true">🌙</span><span class="header-button-label">Dark Mode</span>
                 </button>
             </div>
-        </div>
+        </header>
 
         {% block content %}{% endblock %}
     </div>

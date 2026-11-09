@@ -1,5 +1,13 @@
 ﻿{% extends "base.html" %}
 
+{% block sidebar %}
+            <div class="sidebar-heading">
+                <span>Your chats</span>
+                <button type="button" class="text-button" id="add-person">＋ Add a person</button>
+            </div>
+            <div class="chat-list" id="chat-list"></div>
+{% endblock %}
+
 {% block header_actions %}
                 <button type="button" id="new-chat" class="header-button" aria-label="New chat">
                     <span aria-hidden="true">＋</span><span class="header-button-label">New chat</span>
@@ -21,7 +29,7 @@
         <div class="input-container">
             <form id="chat-form" data-remember-days="{{ remember_days }}">
                 <div class="input-wrapper">
-                    <input type="text" id="input-message" name="message" maxlength="{{ max_message_length }}" autocomplete="off" placeholder="Type your message here">
+                    <input type="text" id="input-message" name="message" maxlength="{{ max_message_length }}" autocomplete="off" placeholder="Type your message here" aria-label="Your message">
                     <input type="submit" value="Send">
                 </div>
             </form>
@@ -30,13 +38,14 @@
                 <label for="terms">I&#39;m 18 or older and agree to the Terms and Conditions</label>
                 <label class="remember-toggle">
                     <input type="checkbox" id="remember-chat" role="switch" aria-describedby="remember-note">
-                    <span>Remember this chat on this device</span>
+                    <span>Remember my chats on this device</span>
                 </label>
-                <button id="terms-button">Terms and Conditions</button>
+                <button type="button" id="terms-button">Terms and Conditions</button>
             </div>
             <p id="remember-note" class="remember-note" hidden>
-                Saved in this browser for {{ remember_days }} days after your last message. Anyone using this
-                browser could see it, so leave this off on shared devices. Delete chat erases it at any time.
+                Your chats and the people you add are saved in this browser for {{ remember_days }} days after
+                each chat&#39;s last message. Anyone using this browser could see them, so leave this off on
+                shared devices. You can delete any chat at any time.
             </p>
         </div>
 {% endblock %}
