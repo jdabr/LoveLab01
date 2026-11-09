@@ -245,6 +245,12 @@ class ChatAssistant:
         # No automatic retries: a retry after a slow failure would run past Heroku's 30s limit
         self.client = OpenAI(api_key=api_key, max_retries=0)
 
+    def _create(self, timeout, **request):
+        # store=False: OpenAI otherwise keeps every response (with the full, unscrubbed conversation)
+        # for at least 30 days and shows it in the dashboard's Logs. LoveLab never retrieves responses
+        # later, and its own logs are scrubbed, so nothing is stored there.
+        return self.client.with_options(timeout=timeout).responses.create(store=False, **request)
+
     def is_on_topic(self, user_message, previous_reply=None):
         """Ask the classifier whether the message belongs in the chat.
 
@@ -256,7 +262,8 @@ class ChatAssistant:
         messages = [{"role": "user", "content": user_message}]
         if previous_reply:
             messages.insert(0, {"role": "assistant", "content": previous_reply})
-        result = self.client.with_options(timeout=FILTER_TIMEOUT).responses.create(
+        result = self._create(
+            FILTER_TIMEOUT,
             model=OPENAI_FILTER_MODEL,
             instructions=FILTER_INSTRUCTIONS,
             input=messages,
@@ -269,7 +276,8 @@ class ChatAssistant:
 
     def reply(self, conversation):
         """Return the assistant's reply to a list of {"role", "content"} messages."""
-        completion = self.client.with_options(timeout=REPLY_TIMEOUT).responses.create(
+        completion = self._create(
+            REPLY_TIMEOUT,
             model=OPENAI_MODEL,
             instructions=ASSISTANT_INSTRUCTIONS,
             input=conversation,
@@ -281,7 +289,9 @@ class ChatAssistant:
 # - IP addresses are never stored. Each visitor gets a "visitor ID" made by HMAC-hashing their IP with a
 #   random secret that changes every day (UTC). Messages from the same visitor on the same day share an ID.
 # - Each day's secret is deleted once a new day starts, after which nobody (including us) can link that
-#   day's IDs back to an IP address or to the same visitor on another day.
+#   day's IDs back to an IP address or to the same visitor on another day. Deletion happens on the first
+#   request of the new day, and by the `flask purge-visitor-salts` command, run daily by Heroku Scheduler
+#   so it also happens when nobody visits.
 # - Emails, phone numbers, links and @handles are replaced with placeholders before saving.
 
 class ChatLogger:
@@ -290,9 +300,29 @@ class ChatLogger:
     def __init__(self, db):
         self.db = db
         self._cached_salt = (None, None)  # (day, secret) so the DB is only asked once per day per process
+        self._last_purge_day = None
+
+    @staticmethod
+    def _today():
+        return datetime.datetime.now(datetime.timezone.utc).date()
+
+    def delete_expired_salts(self):
+        """Destroy earlier days' secrets so past visitor IDs can never be traced back. Returns how many."""
+        today = self._today()
+        deleted = VisitorSalt.query.filter(VisitorSalt.day < today).delete()
+        self.db.session.commit()
+        if self._cached_salt[0] != today:
+            self._cached_salt = (None, None)  # Forget the old secret in this process's memory too
+        self._last_purge_day = today
+        return deleted
+
+    def delete_expired_salts_once_a_day(self):
+        """Cheap enough to call on every request: only touches the database on a new UTC day."""
+        if self._last_purge_day != self._today():
+            self.delete_expired_salts()
 
     def _daily_secret(self):
-        today = datetime.datetime.now(datetime.timezone.utc).date()
+        today = self._today()
         cached_day, cached_secret = self._cached_salt
         if cached_day == today:
             return cached_secret
@@ -307,12 +337,10 @@ class ChatLogger:
                 self.db.session.rollback()
             row = self.db.session.get(VisitorSalt, today)
 
-        # Destroy earlier days' secrets so past visitor IDs can never be traced back
-        VisitorSalt.query.filter(VisitorSalt.day < today).delete()
-        self.db.session.commit()
-
-        self._cached_salt = (today, row.salt)
-        return row.salt
+        salt = row.salt
+        self.delete_expired_salts()
+        self._cached_salt = (today, salt)
+        return salt
 
     def visitor_id(self, ip_address):
         digest = hmac.new(self._daily_secret().encode(), (ip_address or "").encode(), hashlib.sha256)
@@ -394,6 +422,23 @@ def log_exchange(user_message, assistant_message):
 
 
 # ── HTTP handlers ──
+
+@app.before_request
+def delete_yesterdays_visitor_secret():
+    try:
+        chat_logger.delete_expired_salts_once_a_day()
+    except Exception:
+        # Never block a page over this; the next request (or the daily command) tries again
+        db.session.rollback()
+        app.logger.exception("Failed to delete expired visitor secrets")
+
+
+@app.cli.command("purge-visitor-salts")
+def purge_visitor_salts_command():
+    """Delete visitor-ID secrets from earlier days. Schedule daily (e.g. Heroku Scheduler, 00:10 UTC)."""
+    deleted = chat_logger.delete_expired_salts()
+    print(f"Deleted {deleted} expired visitor secret(s).")
+
 
 @app.after_request
 def set_security_headers(response):

@@ -73,6 +73,39 @@ def test_earlier_days_secrets_are_destroyed(app):
     assert [salt.day for salt in remaining] == [yesterday + datetime.timedelta(days=1)]
 
 
+def add_yesterdays_secret():
+    yesterday = datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1)
+    lovelab.db.session.add(VisitorSalt(day=yesterday, salt="old-secret"))
+    lovelab.db.session.commit()
+
+
+def test_any_visit_deletes_yesterdays_secret_even_without_chatting(client):
+    add_yesterdays_secret()
+    client.get("/about")
+    assert VisitorSalt.query.count() == 0
+
+
+def test_yesterdays_secret_is_also_forgotten_from_memory(app):
+    lovelab.chat_logger._cached_salt = (datetime.date(2000, 1, 1), "old-secret")
+    lovelab.chat_logger.delete_expired_salts()
+    assert lovelab.chat_logger._cached_salt == (None, None)
+
+
+def test_daily_command_deletes_old_secrets_but_keeps_todays(app):
+    lovelab.chat_logger.visitor_id("203.0.113.7")  # Creates today's secret
+    add_yesterdays_secret()
+    result = app.test_cli_runner().invoke(args=["purge-visitor-salts"])
+    assert "Deleted 1 expired visitor secret(s)." in result.output
+    assert [salt.day for salt in VisitorSalt.query.all()] == [datetime.datetime.now(datetime.timezone.utc).date()]
+
+
+def test_a_database_problem_never_blocks_the_page(client, monkeypatch):
+    def broken():
+        raise RuntimeError("database down")
+    monkeypatch.setattr(lovelab.chat_logger, "delete_expired_salts", broken)
+    assert client.get("/").status_code == 200
+
+
 def test_visitor_ids_change_when_the_secret_changes(app):
     first = lovelab.chat_logger.visitor_id("203.0.113.7")
     VisitorSalt.query.delete()

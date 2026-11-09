@@ -41,6 +41,11 @@ class TestTopicFilter:
         assert fake_openai.filter_calls[-1][0] == {"role": "assistant", "content": "second reply"}
 
 
+def test_openai_is_told_not_to_store_anything(send, fake_openai):
+    send("my partner and I argue a lot")
+    assert fake_openai.store_flags == [False, False]  # The topic check and the reply
+
+
 class TestHistory:
     def test_previous_exchange_is_sent_with_the_next_message(self, send, fake_openai):
         fake_openai.reply = "first reply"
