@@ -9,7 +9,7 @@ import re
 import secrets
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request, session
+from flask import Flask, jsonify, redirect, render_template, request, session
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
@@ -71,6 +71,12 @@ GLOBAL_CHAT_RATE_LIMIT = os.environ.get("GLOBAL_CHAT_RATE_LIMIT", "3000 per day"
 #   (multiplied by the number of workers) and reset on restart.
 # RATELIMIT_STORAGE_URI overrides both.
 RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI") or os.environ.get("REDIS_URL") or "memory://"
+
+# In production every request must use HTTPS: plain-HTTP requests are redirected, and the HSTS header
+# tells browsers to use HTTPS for this site from then on. Without HTTPS, messages travel unencrypted and
+# browsers refuse the Secure session cookie, so the AI would forget every conversation.
+ENFORCE_HTTPS = ENV != "dev"
+HSTS_HEADER = "max-age=31536000"  # One year
 
 # Content-Security-Policy: the browser may only load scripts, styles and data from this site itself,
 # so even if an injection bug ever let someone insert a <script> tag, the browser would refuse to run it.
@@ -424,6 +430,16 @@ def log_exchange(user_message, assistant_message):
 # ── HTTP handlers ──
 
 @app.before_request
+def redirect_to_https():
+    # request.is_secure reflects the visitor's real connection, via Heroku's X-Forwarded-Proto (ProxyFix)
+    if ENFORCE_HTTPS and not request.is_secure:
+        # 308 keeps a POST a POST (with its body); 301 is the standard permanent redirect for page loads
+        code = 301 if request.method in ("GET", "HEAD") else 308
+        return redirect(request.url.replace("http://", "https://", 1), code=code)
+    return None
+
+
+@app.before_request
 def delete_yesterdays_visitor_secret():
     try:
         chat_logger.delete_expired_salts_once_a_day()
@@ -446,6 +462,8 @@ def set_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"  # Browsers must respect declared content types
     response.headers["X-Frame-Options"] = "DENY"  # Block embedding the site in other pages (clickjacking)
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if ENFORCE_HTTPS and request.is_secure:  # Browsers ignore HSTS sent over plain HTTP
+        response.headers["Strict-Transport-Security"] = HSTS_HEADER
     return response
 
 
