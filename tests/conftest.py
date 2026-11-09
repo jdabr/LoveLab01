@@ -29,12 +29,13 @@ class FakeOpenAI:
         self.filter_calls = []
         self.reply_calls = []
         self.store_flags = []
+        self.reply_token_caps = []
         self.responses = self
 
     def with_options(self, **_options):
         return self
 
-    def create(self, model, instructions, input, store=True):
+    def create(self, model, instructions, input, store=True, max_output_tokens=None):
         self.store_flags.append(store)
         if self.error:
             raise self.error
@@ -42,7 +43,8 @@ class FakeOpenAI:
             self.filter_calls.append(input)
             return types.SimpleNamespace(output_text=self.verdict)
         self.reply_calls.append(input)
-        return types.SimpleNamespace(output_text=self.reply)
+        self.reply_token_caps.append(max_output_tokens)
+        return types.SimpleNamespace(output_text=self.reply, status="completed", incomplete_details=None)
 
 
 @pytest.fixture
@@ -58,7 +60,6 @@ def app(fake_openai):
     lovelab.app.config["TESTING"] = True
     lovelab.limiter.enabled = False
     lovelab.chat_logger._cached_salt = (None, None)
-    lovelab.chat_logger._last_purge_day = None
     with lovelab.app.app_context():
         lovelab.db.create_all()
         yield lovelab.app

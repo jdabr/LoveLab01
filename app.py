@@ -3,11 +3,13 @@
 import datetime
 import hashlib
 import hmac
+import logging
 import os
 import random
 import re
 import secrets
 
+import click
 from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, render_template, request, send_from_directory
 from flask_compress import Compress
@@ -17,7 +19,9 @@ from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from openai import OpenAI
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from privacy import scrub_contact_details
@@ -40,6 +44,9 @@ OPENAI_FILTER_MODEL = os.environ.get("OPENAI_FILTER_MODEL", OPENAI_MODEL)
 # finish well before that; a slow call fails fast with a friendly "try again" message instead.
 FILTER_TIMEOUT = float(os.environ.get("OPENAI_FILTER_TIMEOUT", "8"))
 REPLY_TIMEOUT = float(os.environ.get("OPENAI_REPLY_TIMEOUT", "18"))
+# Hard cap on each reply's length, in tokens (including any reasoning the model does). A normal reply
+# uses a few hundred, so real replies never reach it, but it bounds what anyone can make a reply cost.
+REPLY_MAX_OUTPUT_TOKENS = int(os.environ.get("OPENAI_REPLY_MAX_TOKENS", "4000"))
 
 # Limits that bound OpenAI cost per request
 MAX_MESSAGE_LENGTH = 1000
@@ -75,8 +82,7 @@ GLOBAL_CHAT_RATE_LIMIT = os.environ.get("GLOBAL_CHAT_RATE_LIMIT", "3000 per day"
 RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI") or os.environ.get("REDIS_URL") or "memory://"
 
 # In production every request must use HTTPS: plain-HTTP requests are redirected, and the HSTS header
-# tells browsers to use HTTPS for this site from then on. Without HTTPS, messages travel unencrypted and
-# browsers refuse the Secure session cookie, so the AI would forget every conversation.
+# tells browsers to use HTTPS for this site from then on, so messages never travel unencrypted.
 ENFORCE_HTTPS = ENV != "dev"
 HSTS_HEADER = "max-age=31536000"  # One year
 
@@ -185,6 +191,28 @@ def database_uri():
     raise RuntimeError("No database configured: set DATABASE_URL (or PG_URI)")
 
 
+# Placeholder keys that have appeared in this repository; anyone could use them to forge history tokens
+PLACEHOLDER_SECRET_KEYS = {"your_secret_key", "change-me"}
+MIN_SECRET_KEY_LENGTH = 16
+
+
+def secret_key():
+    """The key that signs history tokens. Production refuses to start without a real one.
+
+    Locally, a random key is used if none is set (the AI then forgets existing chats when the app restarts).
+    """
+    key = os.environ.get("SECRET_KEY")
+    if ENV != "dev" and (not key or key in PLACEHOLDER_SECRET_KEYS or len(key) < MIN_SECRET_KEY_LENGTH):
+        raise RuntimeError(
+            "SECRET_KEY must be set to a long random value in production. Generate one with: "
+            "python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    if not key:
+        logging.getLogger(__name__).warning("SECRET_KEY is not set; using a random key. Set it in your .env file.")
+        return secrets.token_hex(32)
+    return key
+
+
 # ── App setup ──
 
 app = Flask(__name__, static_url_path="/static", static_folder="static")
@@ -195,13 +223,14 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = database_uri()
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+# Check pooled connections before use (Heroku Postgres can drop idle ones), and give up quickly when the
+# database can't be reached, so a database problem never holds up a visitor's reply
+engine_options = {"pool_pre_ping": True}
+if app.config["SQLALCHEMY_DATABASE_URI"].startswith("postgresql"):
+    engine_options["connect_args"] = {"connect_timeout": 5}
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = engine_options
 
-# The secret key signs history tokens (and the session cookie, if one is ever used). Never fall back to a
-# known value: anyone who knows it could forge them. If SECRET_KEY isn't set, a random key is used, and
-# the AI then forgets existing chats whenever the app restarts.
-app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
-if not os.environ.get("SECRET_KEY"):
-    app.logger.warning("SECRET_KEY is not set; using a random key. Set it as a config var.")
+app.secret_key = secret_key()
 
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -251,6 +280,10 @@ class VisitorSalt(db.Model):
 
 # ── Services ──
 
+class EmptyReplyError(RuntimeError):
+    """The model sent back no text, e.g. because it refused or used up its tokens while reasoning."""
+
+
 class ChatAssistant:
     """Talks to OpenAI: checks a message is on topic and generates replies."""
 
@@ -288,23 +321,32 @@ class ChatAssistant:
         return verdict == "YES"
 
     def reply(self, conversation):
-        """Return the assistant's reply to a list of {"role", "content"} messages."""
-        completion = self._create(
+        """Return the assistant's reply to a list of {"role", "content"} messages.
+
+        Raises EmptyReplyError rather than returning a blank reply, so the visitor is asked to try again.
+        """
+        response = self._create(
             REPLY_TIMEOUT,
             model=OPENAI_MODEL,
             instructions=ASSISTANT_INSTRUCTIONS,
             input=conversation,
+            max_output_tokens=REPLY_MAX_OUTPUT_TOKENS,
         )
-        return completion.output_text
+        reply = response.output_text.strip()
+        if not reply:
+            raise EmptyReplyError(f"No reply text (status: {getattr(response, 'status', None)}, "
+                                  f"details: {getattr(response, 'incomplete_details', None)})")
+        return reply
 
 
 # Logs are kept anonymous:
 # - IP addresses are never stored. Each visitor gets a "visitor ID" made by HMAC-hashing their IP with a
 #   random secret that changes every day (UTC). Messages from the same visitor on the same day share an ID.
 # - Each day's secret is deleted once a new day starts, after which nobody (including us) can link that
-#   day's IDs back to an IP address or to the same visitor on another day. Deletion happens on the first
-#   request of the new day, and by the `flask purge-visitor-salts` command, run daily by Heroku Scheduler
-#   so it also happens when nobody visits.
+#   day's IDs back to an IP address or to the same visitor on another day. The database copy is deleted
+#   when the new day's first message is logged, and by the `flask purge-visitor-salts` command, run daily
+#   by Heroku Scheduler so it also happens when nobody chats. Each process also forgets its in-memory copy
+#   on its first request of the new day.
 # - Emails, phone numbers, links and @handles are replaced with placeholders before saving.
 
 class ChatLogger:
@@ -313,26 +355,30 @@ class ChatLogger:
     def __init__(self, db):
         self.db = db
         self._cached_salt = (None, None)  # (day, secret) so the DB is only asked once per day per process
-        self._last_purge_day = None
 
     @staticmethod
     def _today():
         return datetime.datetime.now(datetime.timezone.utc).date()
+
+    @staticmethod
+    def storable(text, max_length):
+        """Text as it may be stored: contact details scrubbed, then truncated to the column size."""
+        # Postgres can't store NUL characters
+        return scrub_contact_details(text.replace("\x00", ""))[:max_length]
 
     def delete_expired_salts(self):
         """Destroy earlier days' secrets so past visitor IDs can never be traced back. Returns how many."""
         today = self._today()
         deleted = VisitorSalt.query.filter(VisitorSalt.day < today).delete()
         self.db.session.commit()
-        if self._cached_salt[0] != today:
-            self._cached_salt = (None, None)  # Forget the old secret in this process's memory too
-        self._last_purge_day = today
+        self.forget_stale_secret()
         return deleted
 
-    def delete_expired_salts_once_a_day(self):
-        """Cheap enough to call on every request: only touches the database on a new UTC day."""
-        if self._last_purge_day != self._today():
-            self.delete_expired_salts()
+    def forget_stale_secret(self):
+        """Drop an earlier day's secret from this process's memory. Never touches the database, so it's
+        free to call on every request."""
+        if self._cached_salt[0] not in (None, self._today()):
+            self._cached_salt = (None, None)
 
     def _daily_secret(self):
         today = self._today()
@@ -363,9 +409,8 @@ class ChatLogger:
         chat_log = ChatLog(
             # Stored in UTC (without timezone info), matching the UTC day used for visitor IDs
             timestamp=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
-            # Scrub first, then truncate to the column sizes
-            user_message=scrub_contact_details(user_message)[:LOGGED_USER_MESSAGE_LENGTH],
-            assistant_message=scrub_contact_details(assistant_message)[:LOGGED_ASSISTANT_MESSAGE_LENGTH],
+            user_message=self.storable(user_message, LOGGED_USER_MESSAGE_LENGTH),
+            assistant_message=self.storable(assistant_message, LOGGED_ASSISTANT_MESSAGE_LENGTH),
             visitor_id=self.visitor_id(ip_address),
         )
         self.db.session.add(chat_log)
@@ -460,13 +505,9 @@ def redirect_to_https():
 
 
 @app.before_request
-def delete_yesterdays_visitor_secret():
-    try:
-        chat_logger.delete_expired_salts_once_a_day()
-    except Exception:
-        # Never block a page over this; the next request (or the daily command) tries again
-        db.session.rollback()
-        app.logger.exception("Failed to delete expired visitor secrets")
+def forget_yesterdays_visitor_secret():
+    # Memory only, so page loads never wait on the database (see ChatLogger for when the database copy goes)
+    chat_logger.forget_stale_secret()
 
 
 @app.cli.command("purge-visitor-salts")
@@ -474,6 +515,43 @@ def purge_visitor_salts_command():
     """Delete visitor-ID secrets from earlier days. Schedule daily (e.g. Heroku Scheduler, 00:30 UTC)."""
     deleted = chat_logger.delete_expired_salts()
     print(f"Deleted {deleted} expired visitor secret(s).")
+
+
+@app.cli.command("scrub-old-logs")
+@click.option("--dry-run", is_flag=True, help="Only count the messages that would change.")
+def scrub_old_logs_command(dry_run):
+    """Remove contact details from stored messages, including ones logged before scrubbing existed.
+
+    Safe to run more than once: messages that are already scrubbed aren't changed.
+    """
+    total = changed = last_id = 0
+    while True:
+        rows = ChatLog.query.filter(ChatLog.id > last_id).order_by(ChatLog.id).limit(500).all()
+        if not rows:
+            break
+        for row in rows:
+            total += 1
+            user = ChatLogger.storable(row.user_message, LOGGED_USER_MESSAGE_LENGTH)
+            assistant = ChatLogger.storable(row.assistant_message, LOGGED_ASSISTANT_MESSAGE_LENGTH)
+            if (user, assistant) != (row.user_message, row.assistant_message):
+                changed += 1
+                if not dry_run:
+                    row.user_message, row.assistant_message = user, assistant
+        last_id = rows[-1].id
+        db.session.commit()
+    # End the transaction the final (empty) query started. Postgres holds a lock on the table until then,
+    # and VACUUM FULL below would wait for it forever.
+    db.session.close()
+
+    if dry_run:
+        print(f"{changed} of {total} stored messages contain contact details and would be scrubbed.")
+        return
+    if changed and db.engine.dialect.name == "postgresql":
+        # Updating a row leaves its old version on disk until the table is rewritten. VACUUM FULL rewrites
+        # it so the old contact details are physically erased. It can't run inside a transaction.
+        with db.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            connection.execute(text("VACUUM FULL chat_log"))
+    print(f"Scrubbed contact details from {changed} of {total} stored messages.")
 
 
 @app.after_request
@@ -493,9 +571,41 @@ def rate_limited(_error):
     return jsonify({"message": RATE_LIMITED_REPLY}), 429
 
 
+def parse_chat_request():
+    """Read the chat message the browser sent.
+
+    Returns (message, history token, None) for a valid message, or (None, None, reply) with the reply to
+    send back when the request is turned away. Never raises, whatever the request body contains.
+    """
+    try:
+        data = request.get_json(silent=True)
+    except RequestEntityTooLarge:
+        return None, None, TOO_LONG_REPLY
+    except RecursionError:  # Absurdly nested JSON
+        data = None
+    if not isinstance(data, dict):  # Not JSON, or JSON that isn't an object
+        data = {}
+
+    message = data.get("message")
+    if isinstance(message, str):
+        message = message.replace("\x00", "").strip()  # Postgres can't store NUL characters
+    if not isinstance(message, str) or not message:
+        return None, None, EMPTY_MESSAGE_REPLY
+    if len(message) > MAX_MESSAGE_LENGTH:
+        return None, None, TOO_LONG_REPLY
+    return message, data.get("history"), None
+
+
+def is_turned_away():
+    """Requests turned away before reaching OpenAI don't count toward the rate limits. Otherwise anyone
+    could send free, empty requests to use up the site-wide limit and block everyone else."""
+    return parse_chat_request()[2] is not None
+
+
 @app.route("/", methods=["GET", "POST"])
-@limiter.limit(CHAT_RATE_LIMIT, methods=["POST"])
-@limiter.shared_limit(GLOBAL_CHAT_RATE_LIMIT, scope="global-chat", key_func=lambda: "all-visitors", methods=["POST"])
+@limiter.limit(CHAT_RATE_LIMIT, methods=["POST"], exempt_when=is_turned_away)
+@limiter.shared_limit(GLOBAL_CHAT_RATE_LIMIT, scope="global-chat", key_func=lambda: "all-visitors",
+                      methods=["POST"], exempt_when=is_turned_away)
 def home():
     if request.method in ("GET", "HEAD"):
         # The browser draws the visitor's saved chats itself
@@ -505,16 +615,12 @@ def home():
             remember_days=REMEMBER_DAYS,
         )
 
-    data = request.get_json(silent=True) or {}
-    user_message = data.get("message")
-    if not isinstance(user_message, str) or not user_message.strip():
-        return jsonify({"message": EMPTY_MESSAGE_REPLY}), 400
-    user_message = user_message.strip()
-    if len(user_message) > MAX_MESSAGE_LENGTH:
-        return jsonify({"message": TOO_LONG_REPLY}), 400
+    user_message, history, rejection = parse_chat_request()
+    if rejection:
+        return jsonify({"message": rejection}), 400
 
     try:
-        assistant_message, history_token = respond_to(user_message, data.get("history"))
+        assistant_message, history_token = respond_to(user_message, history)
     except Exception:
         # Log the full error (visible in Heroku logs) and give the user a friendly reply instead of a 500
         app.logger.exception("OpenAI request failed")

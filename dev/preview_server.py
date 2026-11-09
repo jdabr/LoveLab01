@@ -45,7 +45,7 @@ class FakeOpenAI:
     def with_options(self, **_options):
         return self
 
-    def create(self, model, instructions, input, store=True):
+    def create(self, model, instructions, input, **_options):
         if instructions == lovelab.FILTER_INSTRUCTIONS:
             return types.SimpleNamespace(output_text="YES")
         reply = SAMPLE_REPLIES[self.count % len(SAMPLE_REPLIES)]

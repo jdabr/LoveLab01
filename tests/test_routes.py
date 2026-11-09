@@ -65,6 +65,31 @@ class TestChatValidation:
         response = client.post("/", data="hello", content_type="text/plain")
         assert response.status_code == 400
 
+    @pytest.mark.parametrize("body", ["[1, 2]", '"hello"', "5", "true", "null", "[" * 5000 + "]" * 5000])
+    def test_json_that_isnt_an_object_gets_a_readable_400(self, client, fake_openai, body):
+        # These used to crash with a 500 error page
+        response = client.post("/", data=body, content_type="application/json")
+        assert response.status_code == 400
+        assert response.json["message"] == lovelab.EMPTY_MESSAGE_REPLY
+        assert not fake_openai.filter_calls
+
+    def test_oversized_body_gets_the_too_long_reply(self, client, fake_openai):
+        body = '{"message": "' + "a" * 20000 + '"}'
+        response = client.post("/", data=body, content_type="application/json")
+        assert response.status_code == 400
+        assert response.json["message"] == lovelab.TOO_LONG_REPLY
+        assert not fake_openai.filter_calls
+
+    def test_nul_characters_are_removed(self, send, fake_openai):
+        # Postgres can't store them, so the message would otherwise fail to be logged
+        send("hi\x00 there")
+        assert fake_openai.filter_calls[0] == [{"role": "user", "content": "hi there"}]
+
+    def test_message_of_only_nul_characters_is_empty(self, send, fake_openai):
+        response = send("\x00\x00")
+        assert response.status_code == 400
+        assert not fake_openai.filter_calls
+
     def test_rejects_messages_over_the_limit(self, send, fake_openai):
         response = send("a" * (lovelab.MAX_MESSAGE_LENGTH + 1))
         assert response.status_code == 400
@@ -103,6 +128,23 @@ class TestChatReplies:
         assert response.status_code == 502
         assert response.json["message"] == lovelab.SERVICE_ERROR_REPLY
 
+    @pytest.mark.parametrize("blank", ["", "   \n  "])
+    def test_blank_model_reply_asks_to_try_again(self, send, fake_openai, blank):
+        # e.g. the model refused, or ran out of tokens while reasoning: never show an empty bubble
+        fake_openai.reply = blank
+        response = send("My partner never listens")
+        assert response.status_code == 502
+        assert response.json["message"] == lovelab.SERVICE_ERROR_REPLY
+        assert "history" not in response.json
+
+    def test_reply_length_is_capped(self, send, fake_openai):
+        send("My partner never listens")
+        assert fake_openai.reply_token_caps == [lovelab.REPLY_MAX_OUTPUT_TOKENS]
+
+    def test_reply_surrounding_whitespace_is_trimmed(self, send, fake_openai):
+        fake_openai.reply = "\n  Some advice.  \n"
+        assert send("My partner never listens").json["message"] == "Some advice."
+
     def test_logging_failure_still_returns_reply(self, send, monkeypatch):
         def broken_log(*_args):
             raise RuntimeError("database down")
@@ -134,6 +176,23 @@ class TestRateLimiting:
         per_minute = int(lovelab.CHAT_RATE_LIMIT.split(" per minute")[0])
         for _ in range(per_minute + 2):
             assert client.get("/").status_code == 200
+
+    def test_rejected_requests_do_not_use_up_the_limits(self, client, send):
+        # Otherwise anyone could exhaust the site-wide daily limit with free, empty requests
+        per_minute = int(lovelab.CHAT_RATE_LIMIT.split(" per minute")[0])
+        for _ in range(per_minute):
+            assert client.post("/", json={"message": "   "}).status_code == 400
+            assert client.post("/", data="[1]", content_type="application/json").status_code == 400
+            assert send("a" * (lovelab.MAX_MESSAGE_LENGTH + 1)).status_code == 400
+        assert send("How do I talk to my partner?").status_code == 200
+
+    def test_failed_replies_still_count(self, send, fake_openai):
+        # They reached OpenAI, which may still have cost money
+        fake_openai.error = TimeoutError("slow")
+        per_minute = int(lovelab.CHAT_RATE_LIMIT.split(" per minute")[0])
+        for _ in range(per_minute):
+            assert send("hello").status_code == 502
+        assert send("hello").status_code == 429
 
 
 class TestStaticExtras:

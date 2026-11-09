@@ -1,4 +1,4 @@
-"""Tests for choosing the database from environment variables."""
+"""Tests for configuration read from environment variables: the database and the secret key."""
 
 import pytest
 
@@ -33,3 +33,24 @@ def test_dev_uses_database_url(monkeypatch):
     monkeypatch.setattr(lovelab, "ENV", "dev")
     monkeypatch.setenv("DATABASE_URL", "postgresql://local/db")
     assert lovelab.database_uri() == "postgresql://local/db"
+
+
+class TestSecretKey:
+    @pytest.mark.parametrize("value", [None, "", "your_secret_key", "change-me", "too-short"])
+    def test_production_refuses_a_missing_or_weak_key(self, prod, value):
+        if value is None:
+            prod.delenv("SECRET_KEY", raising=False)
+        else:
+            prod.setenv("SECRET_KEY", value)
+        with pytest.raises(RuntimeError, match="SECRET_KEY must be set"):
+            lovelab.secret_key()
+
+    def test_production_uses_a_real_key(self, prod):
+        prod.setenv("SECRET_KEY", "f" * 64)
+        assert lovelab.secret_key() == "f" * 64
+
+    def test_dev_without_a_key_gets_a_random_one(self, monkeypatch):
+        monkeypatch.setattr(lovelab, "ENV", "dev")
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        first, second = lovelab.secret_key(), lovelab.secret_key()
+        assert len(first) == 64 and first != second
