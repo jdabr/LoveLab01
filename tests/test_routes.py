@@ -72,8 +72,13 @@ class TestChatReplies:
     def test_off_topic_message_skips_the_main_model(self, send, fake_openai):
         fake_openai.verdict = "NO"
         response = send("What's the weather?")
-        assert response.json["message"] == lovelab.OFF_TOPIC_REPLY
+        assert response.json["message"] in lovelab.OFF_TOPIC_REPLIES
         assert not fake_openai.reply_calls
+
+    def test_off_topic_replies_vary(self, send, fake_openai):
+        fake_openai.verdict = "NO"
+        replies = {send("What's the weather?").json["message"] for _ in range(30)}
+        assert len(replies) > 1
 
     def test_openai_failure_returns_friendly_error(self, send, fake_openai):
         fake_openai.error = TimeoutError("slow")

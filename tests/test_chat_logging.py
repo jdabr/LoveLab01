@@ -20,7 +20,7 @@ def test_each_exchange_is_logged(send, fake_openai):
 def test_off_topic_exchanges_are_logged_too(send, fake_openai):
     fake_openai.verdict = "NO"
     send("what's the weather")
-    assert logged_rows()[0].assistant_message == lovelab.OFF_TOPIC_REPLY
+    assert logged_rows()[0].assistant_message in lovelab.OFF_TOPIC_REPLIES
 
 
 def test_contact_details_are_scrubbed_before_saving(send, fake_openai):
