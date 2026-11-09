@@ -492,6 +492,68 @@ class ChatLibrary {
 
 // ── Messages ──
 
+// Adds text to parent, turning **bold** and *italic* into <strong> and <em>
+function appendInline(parent, text) {
+    const pattern = /\*\*(.+?)\*\*|\*(\S(?:.*?\S)?)\*/g;
+    let last = 0;
+    for (const match of text.matchAll(pattern)) {
+        if (match.index > last) parent.append(text.slice(last, match.index));
+        parent.append(createElement(match[1] !== undefined ? 'strong' : 'em', '', match[1] ?? match[2]));
+        last = match.index + match[0].length;
+    }
+    if (last < text.length) parent.append(text.slice(last));
+}
+
+// Renders the light Markdown the AI writes (paragraphs, "-" and "1." lists, **bold**, *italic*, and
+// "#" headings shown as bold lines). Everything is built with text nodes, so a reply can never
+// inject HTML.
+function renderRichText(container, text) {
+    let paragraph = null;
+    let list = null;
+    for (const rawLine of text.replace(/\r\n?/g, '\n').split('\n')) {
+        const line = rawLine.trim();
+        if (!line) {
+            paragraph = null;  // A blank line ends a paragraph; lists may continue after one
+            continue;
+        }
+        const bullet = line.match(/^[-*•]\s+(.*)$/);
+        const numbered = line.match(/^(\d+)[.)]\s+(.*)$/);
+        const heading = line.match(/^#{1,6}\s+(.*)$/);
+
+        if (bullet || numbered) {
+            const tag = bullet ? 'UL' : 'OL';
+            if (list?.tagName !== tag) {
+                list = container.appendChild(createElement(tag.toLowerCase()));
+                if (numbered && numbered[1] !== '1') list.start = Number(numbered[1]);
+            }
+            appendInline(list.appendChild(createElement('li')), bullet ? bullet[1] : numbered[2]);
+            paragraph = null;
+        } else if (heading) {
+            paragraph = list = null;
+            appendInline(container.appendChild(createElement('p', 'reply-heading')), heading[1]);
+        } else if (paragraph) {
+            paragraph.append(document.createElement('br'));
+            appendInline(paragraph, line);
+        } else {
+            list = null;
+            paragraph = container.appendChild(createElement('p'));
+            appendInline(paragraph, line);
+        }
+    }
+}
+
+// Scrolls so a new message can be read from its start: short messages scroll to the bottom, and a
+// reply taller than the view is lined up with the top instead
+function scrollToMessage(container, element) {
+    const margin = 16;
+    if (element.offsetHeight + margin * 2 <= container.clientHeight) {
+        container.scrollTop = container.scrollHeight;
+        return;
+    }
+    const top = element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    container.scrollTop += top - margin;
+}
+
 // Represents a single chat message and renders it in the chat container
 class Message {
     constructor(role, content) {
@@ -501,14 +563,16 @@ class Message {
 
     createElement() {
         const element = createElement('div', `message ${this.role === 'user' ? 'user-message' : 'assistant-message'}`);
-        element.innerText = this.content;  // innerText keeps the reply's line breaks
+        if (this.role === 'user') element.textContent = this.content;  // Line breaks kept by CSS
+        else renderRichText(element, this.content);
         return element;
     }
 
     // Adds the message to the container and scrolls so it's visible
     display(container) {
-        container.appendChild(this.createElement());
-        container.scrollTop = container.scrollHeight;
+        const element = this.createElement();
+        container.appendChild(element);
+        scrollToMessage(container, element);
     }
 }
 
@@ -531,6 +595,46 @@ class ThinkingMessage extends Message {
 
 const RELATIONSHIPS = ['Partner', 'Dating', 'Ex', 'Family', 'Friend', 'Coworker', 'Other'];
 const MAX_NAME_LENGTH = 40;
+
+// Example questions shown in an empty chat, matched to who the chat is about. The AI isn't told the
+// relationship; these are just conversation starters.
+const SUGGESTIONS = {
+    General: [
+        'How do I make new friends as an adult?',
+        'How can I set boundaries without feeling guilty?',
+        'How do I tell someone they hurt me?',
+    ],
+    Partner: [
+        'We keep having the same argument. How do we break the cycle?',
+        'How can we feel closer when life gets busy?',
+        "How do I bring up something that's been bothering me?",
+    ],
+    Dating: [
+        "How can I tell if they're interested in me?",
+        'When is the right time to talk about being exclusive?',
+        'How do I keep a conversation going on a date?',
+    ],
+    Ex: [
+        'Is it a good idea to stay friends with an ex?',
+        'How do I stop thinking about them?',
+        'Should I reply to their message?',
+    ],
+    Family: [
+        'How do I set boundaries with a parent?',
+        'How can I handle tension at family gatherings?',
+        "How do I reconnect with a sibling I've drifted from?",
+    ],
+    Friend: [
+        'My friend keeps cancelling plans. Should I say something?',
+        "How do I support a friend who's going through a hard time?",
+        'How do I tell a friend they hurt my feelings?',
+    ],
+    Coworker: [
+        'How do I handle a coworker who takes credit for my work?',
+        'How can I give honest feedback without making things awkward?',
+        "How do I work with someone I don't get along with?",
+    ],
+};
 
 // A round badge with the person's initial, coloured consistently from their id
 function createAvatar(person) {
@@ -600,6 +704,9 @@ class ChatApp {
         this.addPersonButton = document.getElementById('add-person');
         this.rememberSwitch = document.getElementById('remember-chat');
         this.rememberNote = document.getElementById('remember-note');
+        this.emptyState = document.getElementById('empty-state');
+        this.emptyTitle = document.getElementById('empty-title');
+        this.suggestions = document.getElementById('suggestions');
         this.termsManager = new TermsManager('terms-button', 'terms');
         this.server = new Server();
         this.library = new ChatLibrary(Number(this.form.dataset.rememberDays) || 30);
@@ -670,7 +777,30 @@ class ChatApp {
     }
 
     addMessage(role, content) {
+        this.showEmptyState(false);
         new Message(role, content).display(this.messageContainer);
+    }
+
+    // An empty chat shows a greeting and example questions suited to who the chat is about
+    showEmptyState(show) {
+        this.emptyState.hidden = !show;
+        if (!show) return;
+        const person = this.library.getPerson(this.current.personId);
+        this.emptyTitle.textContent = person ? `What's going on with ${person.name}?` : "What's on your mind?";
+        const questions = SUGGESTIONS[person?.relationship] ?? SUGGESTIONS.General;
+        this.suggestions.replaceChildren(...questions.map(question => {
+            const button = createElement('button', 'suggestion', question);
+            button.type = 'button';
+            return button;
+        }));
+    }
+
+    // Sends an example question as if the visitor typed it (agreeing to the terms first if needed)
+    useSuggestion(event) {
+        const button = event.target.closest('.suggestion');
+        if (!button) return;
+        this.inputMessage.value = button.textContent;
+        this.send();
     }
 
     showThinking() {
@@ -689,8 +819,8 @@ class ChatApp {
         this.current = { chatId: chat?.id ?? null, personId: chat ? chat.personId : personId };
         this.library.setActive(this.current.chatId);
 
-        // Keep only the welcome message, which the server renders first
-        [...this.messageContainer.children].slice(1).forEach(element => element.remove());
+        this.messageContainer.querySelectorAll('.message').forEach(element => element.remove());
+        this.showEmptyState(!chat?.messages.length);
         chat?.messages.forEach(({ role, content }) => this.addMessage(role, content));
         if (chat && chat.id === this.pendingChatId) this.showThinking();
 
@@ -910,6 +1040,7 @@ class ChatApp {
         this.deleteChatButton.addEventListener('click', () => this.deleteChat());
         this.addPersonButton.addEventListener('click', () => this.addPerson());
         this.chatList.addEventListener('click', (e) => this.handleChatListClick(e));
+        this.suggestions.addEventListener('click', (e) => this.useSuggestion(e));
         this.rememberSwitch.addEventListener('change', () => {
             this.library.setRemembered(this.rememberSwitch.checked);
             this.showRememberSetting(this.rememberSwitch.checked);

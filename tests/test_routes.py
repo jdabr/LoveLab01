@@ -6,10 +6,11 @@ import app as lovelab
 
 
 class TestHomePage:
-    def test_shows_welcome_message(self, client):
+    def test_shows_empty_chat_greeting(self, client):
         response = client.get("/")
         assert response.status_code == 200
-        assert lovelab.WELCOME_MESSAGE.split("!")[0].encode() in response.data
+        assert b'id="empty-state"' in response.data
+        assert b'id="suggestions"' in response.data
 
     def test_input_limit_matches_server_limit(self, client):
         response = client.get("/")
@@ -133,3 +134,20 @@ class TestRateLimiting:
         per_minute = int(lovelab.CHAT_RATE_LIMIT.split(" per minute")[0])
         for _ in range(per_minute + 2):
             assert client.get("/").status_code == 200
+
+
+class TestStaticExtras:
+    @pytest.mark.parametrize("path, content_type", [("/favicon.ico", "image/"), ("/apple-touch-icon.png", "image/png")])
+    def test_root_icons_are_served(self, client, path, content_type):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.content_type.startswith(content_type)
+
+    def test_pages_are_compressed(self, client):
+        response = client.get("/static/script.js", headers={"Accept-Encoding": "gzip, deflate, br, zstd"})
+        assert response.headers.get("Content-Encoding") in ("gzip", "br", "deflate", "zstd")
+
+    def test_chat_replies_are_not_compressed(self, client, send):
+        response = send("How do I talk to my partner about chores?", headers={"Accept-Encoding": "gzip"})
+        assert response.status_code == 200
+        assert "Content-Encoding" not in response.headers

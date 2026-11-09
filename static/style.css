@@ -365,9 +365,77 @@ body {
 
 /* ── Messages ── */
 .message {
-    display: flex;
     line-height: 1.6;
     font-size: 0.95rem;
+    overflow-wrap: anywhere;
+}
+
+.user-message { white-space: pre-wrap; }
+
+/* Formatted replies: paragraphs, lists and bold text */
+.assistant-message > * { margin: 0; }
+.assistant-message > * + * { margin-top: 0.75em; }
+.assistant-message ul,
+.assistant-message ol { padding-left: 1.4em; }
+.assistant-message li + li { margin-top: 0.3em; }
+.assistant-message li::marker { color: var(--text-secondary); }
+.assistant-message strong,
+.assistant-message .reply-heading { font-weight: 600; }
+
+/* ── Empty chat: greeting and example questions ── */
+.empty-state {
+    margin: auto 0;
+    padding: 1rem 0 2rem;
+    text-align: center;
+}
+
+.empty-state[hidden] { display: none; }
+
+.empty-title {
+    margin: 0 0 0.5rem;
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.empty-text {
+    margin: 0 auto 1.75rem;
+    max-width: 32rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.suggestions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: 0.75rem;
+    max-width: 48rem;
+    margin: 0 auto;
+}
+
+.suggestion {
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.9rem;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: 0 1px 4px var(--shadow);
+    transition: border-color 0.15s, transform 0.15s;
+}
+
+.suggestion:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+}
+
+.suggestion:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 .user-message {

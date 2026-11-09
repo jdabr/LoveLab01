@@ -19,11 +19,14 @@
 
 {% block content %}
         <div id="message-container">
-            {% for message in messages %}
-            <div class="message {% if message.role == 'user' %}user-message{% else %}assistant-message{% endif %}">
-                {{ message.content }}
-            </div>
-            {% endfor %}
+            <section class="empty-state" id="empty-state" aria-labelledby="empty-title">
+                <h1 class="empty-title" id="empty-title">What&#39;s on your mind?</h1>
+                <p class="empty-text">
+                    Talk through what&#39;s happening with a partner, family, friends or coworkers.
+                    The more detail you share, the more helpful I can be.
+                </p>
+                <div class="suggestions" id="suggestions" aria-label="Example questions"></div>
+            </section>
         </div>
 
         <div class="input-container">

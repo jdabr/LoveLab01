@@ -6,6 +6,7 @@
     <title>{% block title %}LoveLab{% endblock %}</title>
     <meta name="description" content="LoveLab is an AI companion for the relationships in your life: partners, family, friends and coworkers. No account needed.">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
     <!-- Applies the saved theme before the page renders, so there's no flash of the wrong theme -->
     <script src="{{ url_for('static', filename='theme-init.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
