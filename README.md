@@ -19,7 +19,7 @@ partner, family, friends or coworkers and get warm, practical guidance, with no 
 - **Private by design.** No accounts, no cookies, and chats stay on your device unless you choose
   to remember them. Stored logs are anonymized.
 - **Focused and safe.** Off-topic requests are gently declined, and messages about danger or
-  self-harm always get a caring reply with crisis resources.
+  self-harm are prioritized, with a caring reply and crisis resources.
 - **Responsive.** Works on phones and large monitors, in light and dark mode.
 
 ## How a message flows through the app
@@ -50,7 +50,7 @@ flowchart LR
 | Encryption in transit | In production, plain-HTTP requests are redirected to HTTPS (`308` for `POST`, so messages aren't silently dropped), and an `HSTS` header tells browsers to use HTTPS for the site from then on. |
 | Cross-site attacks | A strict Content-Security-Policy (no inline scripts or styles), `X-Frame-Options: DENY`, and no cookies to steal or ride on. All user-supplied text, including people's names, is rendered with `textContent`, never as HTML. |
 | Cost and availability | Per-call timeouts keep both OpenAI calls within Heroku's 30-second limit, automatic retries are off, and a moving-window rate limit caps usage per visitor and globally. |
-| Crisis situations | Both prompts treat safety as overriding the topic rule: the classifier always lets these messages through, and the reply model is instructed to share emergency, 988 and domestic-violence resources. |
+| Crisis situations | Both prompts treat safety as overriding the topic rule: the classifier is instructed to always let these messages through, and the reply model is instructed to share emergency, 988 and domestic-violence resources. |
 
 ## Tech stack
 

@@ -208,7 +208,7 @@ class Modal {
 // Handles the terms and conditions agreement and modal
 class TermsManager {
     // Change TERMS_VERSION whenever TermsAndConditions.txt is updated so visitors are asked to agree again
-    static TERMS_VERSION = '2026-11-09.1';
+    static TERMS_VERSION = '2026-11-09.2';
     static STORAGE_KEY = 'termsAccepted';
 
     constructor(termsButtonId, termsCheckboxId) {
