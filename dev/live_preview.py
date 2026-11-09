@@ -38,7 +38,7 @@ SAMPLE_MESSAGES = [
 
 def terms_version():
     """Read the current terms version so the preview can skip the terms modal."""
-    match = re.search(r"TERMS_VERSION = '([^']+)'", (ROOT / "static" / "script.js").read_text(encoding="utf-8"))
+    match = re.search(r"static VERSION = '([^']+)'", (ROOT / "static" / "script.js").read_text(encoding="utf-8-sig"))
     return match.group(1) if match else ""
 
 
@@ -102,7 +102,7 @@ def take_screenshots(pages):
             continue
         for theme in ("light", "dark"):
             set_theme(page, theme)
-            page.screenshot(path=SCREENSHOT_DIR / f"{name}-{theme}-welcome.png")
+            page.screenshot(path=SCREENSHOT_DIR / f"{name}-{theme}-empty.png")
         try:
             have_conversation(page)
         except PlaywrightError as error:

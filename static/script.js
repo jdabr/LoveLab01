@@ -32,9 +32,9 @@ function getStorage(name) {
 
 // Manages the dark/light mode toggle and persists the user's preference
 class ThemeManager {
-    constructor(toggleBtnId) {
-        this.toggleBtn = document.getElementById(toggleBtnId);
-        this.darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    constructor(buttonId) {
+        this.button = document.getElementById(buttonId);
+        this.darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
     }
 
     getSavedTheme() {
@@ -42,15 +42,15 @@ class ThemeManager {
     }
 
     getPreferredTheme() {
-        return this.getSavedTheme() || (this.darkMediaQuery.matches ? 'dark' : 'light');
+        return this.getSavedTheme() || (this.darkQuery.matches ? 'dark' : 'light');
     }
 
     applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
         const [icon, label] = theme === 'dark' ? ['☀️', 'Light Mode'] : ['🌙', 'Dark Mode'];
-        this.toggleBtn.querySelector('[aria-hidden]').textContent = icon;
-        this.toggleBtn.querySelector('.header-button-label').textContent = label;
-        this.toggleBtn.setAttribute('aria-label', `Switch to ${label.toLowerCase()}`);
+        this.button.querySelector('[aria-hidden]').textContent = icon;
+        this.button.querySelector('.header-button-label').textContent = label;
+        this.button.setAttribute('aria-label', `Switch to ${label.toLowerCase()}`);
     }
 
     toggle() {
@@ -60,14 +60,14 @@ class ThemeManager {
     }
 
     watchSystemTheme() {
-        this.darkMediaQuery.addEventListener('change', (e) => {
+        this.darkQuery.addEventListener('change', (e) => {
             if (!this.getSavedTheme()) this.applyTheme(e.matches ? 'dark' : 'light');
         });
     }
 
     init() {
         this.applyTheme(this.getPreferredTheme());
-        this.toggleBtn.addEventListener('click', () => this.toggle());
+        this.button.addEventListener('click', () => this.toggle());
         this.watchSystemTheme();
     }
 }
@@ -207,14 +207,14 @@ class Modal {
 
 // Handles the terms and conditions agreement and modal
 class TermsManager {
-    // Change TERMS_VERSION whenever TermsAndConditions.txt is updated so visitors are asked to agree again
-    static TERMS_VERSION = '2026-11-09.2';
+    // Change VERSION whenever TermsAndConditions.txt is updated so visitors are asked to agree again
+    static VERSION = '2026-11-09.2';
     static STORAGE_KEY = 'termsAccepted';
 
-    constructor(termsButtonId, termsCheckboxId) {
-        this.termsButton = document.getElementById(termsButtonId);
-        this.termsCheckbox = document.getElementById(termsCheckboxId);
-        this.termsLabel = document.querySelector('label[for="terms"]');
+    constructor(buttonId, checkboxId) {
+        this.button = document.getElementById(buttonId);
+        this.checkbox = document.getElementById(checkboxId);
+        this.label = document.querySelector(`label[for="${checkboxId}"]`);
     }
 
     // Opens the terms in a dialog. onAgree (optional) runs after the visitor clicks "I agree".
@@ -268,58 +268,55 @@ class TermsManager {
     }
 
     agree() {
-        this.termsCheckbox.checked = true;
+        this.checkbox.checked = true;
         this.handleAgreement();
     }
 
     // Hides the checkbox and label once the user agrees, and remembers it on this device
     handleAgreement() {
-        if (!this.termsCheckbox.checked) return;
-        this.termsCheckbox.hidden = true;
-        if (this.termsLabel) this.termsLabel.hidden = true;
+        if (!this.checkbox.checked) return;
+        this.checkbox.hidden = true;
+        if (this.label) this.label.hidden = true;
         // If storage is unavailable (e.g. private mode), the agreement lasts for this page only
-        getStorage('localStorage')?.setItem(TermsManager.STORAGE_KEY, TermsManager.TERMS_VERSION);
+        getStorage('localStorage')?.setItem(TermsManager.STORAGE_KEY, TermsManager.VERSION);
     }
 
     restoreAgreement() {
-        if (getStorage('localStorage')?.getItem(TermsManager.STORAGE_KEY) === TermsManager.TERMS_VERSION) {
+        if (getStorage('localStorage')?.getItem(TermsManager.STORAGE_KEY) === TermsManager.VERSION) {
             this.agree();
         }
     }
 
     isAgreed() {
-        return this.termsCheckbox.checked;
+        return this.checkbox.checked;
     }
 
     init() {
-        this.termsButton.addEventListener('click', () => this.showModal());
-        this.termsCheckbox.addEventListener('change', () => this.handleAgreement());
+        this.button.addEventListener('click', () => this.showModal());
+        this.checkbox.addEventListener('change', () => this.handleAgreement());
         this.restoreAgreement();
     }
 }
 
 // ── Server ──
 
-// Handles communication with the Flask backend
-class Server {
-    // history is the chat's signed history token (or null for a new chat). Resolves to
-    // { message, history }: the reply and the chat's updated history token. Rejects on errors; when
-    // the server explains the problem (e.g. too many messages), error.userMessage holds its explanation.
-    postMessage(message, history) {
-        return fetch('/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, history }),
-        }).then(response => response.json()
-            .catch(() => null)  // Non-JSON responses (e.g. an HTML error page)
-            .then(data => {
-                if (!data || typeof data.message !== 'string' || !data.message.trim()) {
-                    throw new Error(`Server error (${response.status})`);
-                }
-                if (!response.ok) throw Object.assign(new Error(data.message), { userMessage: data.message });
-                return { message: data.message, history: typeof data.history === 'string' ? data.history : null };
-            }));
-    }
+// Sends a message to the server. history is the chat's signed history token (or null for a new chat).
+// Resolves to { message, history }: the reply and the chat's updated history token. Rejects on errors;
+// when the server explains the problem (e.g. too many messages), error.userMessage holds its explanation.
+function requestReply(message, history) {
+    return fetch('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, history }),
+    }).then(response => response.json()
+        .catch(() => null)  // Non-JSON responses (e.g. an HTML error page)
+        .then(data => {
+            if (!data || typeof data.message !== 'string' || !data.message.trim()) {
+                throw new Error(`Server error (${response.status})`);
+            }
+            if (!response.ok) throw Object.assign(new Error(data.message), { userMessage: data.message });
+            return { message: data.message, history: typeof data.history === 'string' ? data.history : null };
+        }));
 }
 
 // ── Saved chats ──
@@ -756,7 +753,7 @@ class ChatApp {
         this.drawer = drawer;
         this.messageContainer = document.getElementById('message-container');
         this.form = document.getElementById('chat-form');
-        this.inputMessage = document.getElementById('input-message');
+        this.input = document.getElementById('input-message');
         this.sendButton = this.form.querySelector('[type="submit"]');
         this.headerTitle = document.getElementById('header-title');
         this.newChatButton = document.getElementById('new-chat');
@@ -769,8 +766,7 @@ class ChatApp {
         this.emptyTitle = document.getElementById('empty-title');
         this.suggestions = document.getElementById('suggestions');
         this.announcer = document.getElementById('chat-announcer');
-        this.termsManager = new TermsManager('terms-button', 'terms');
-        this.server = new Server();
+        this.terms = new TermsManager('terms-button', 'terms');
         this.library = new ChatLibrary(Number(this.form.dataset.rememberDays) || 30);
         this.library.onSaveFailed = () => this.warnSaveFailed();
         this.saveWarningShown = false;
@@ -782,12 +778,12 @@ class ChatApp {
 
     send() {
         if (this.pendingChatId) return;  // One message at a time
-        const userMessage = this.inputMessage.value.trim();
+        const userMessage = this.input.value.trim();
         if (!userMessage) return;
 
         // Instead of blocking with an alert, show the terms; agreeing sends the message
-        if (!this.termsManager.isAgreed()) {
-            this.termsManager.showModal(() => this.send());
+        if (!this.terms.isAgreed()) {
+            this.terms.showModal(() => this.send());
             return;
         }
 
@@ -801,11 +797,11 @@ class ChatApp {
 
         this.addMessage('user', userMessage);
         this.library.addMessage(chatId, 'user', userMessage);
-        this.inputMessage.value = '';
+        this.input.value = '';
         this.setPending(chatId);
         this.renderSidebar();
 
-        this.server.postMessage(userMessage, chat.history)
+        requestReply(userMessage, chat.history)
             .then(({ message, history }) => {
                 this.library.addMessage(chatId, 'assistant', message);
                 this.library.setHistory(chatId, history);
@@ -887,7 +883,7 @@ class ChatApp {
     useSuggestion(event) {
         const button = event.target.closest('.suggestion');
         if (!button) return;
-        this.inputMessage.value = button.textContent;
+        this.input.value = button.textContent;
         this.send();
     }
 
@@ -908,7 +904,7 @@ class ChatApp {
         this.library.setActive(this.current.chatId);
         this.renderMessages(chat);
 
-        this.inputMessage.value = '';
+        this.input.value = '';
         this.updateHeader();
         this.renderSidebar();
         this.drawer?.close();
@@ -1155,7 +1151,7 @@ class ChatApp {
 
     // Focus the message box on desktop only; on phones it would pop the keyboard open
     focusInput() {
-        if (window.matchMedia('(pointer: fine)').matches) this.inputMessage.focus();
+        if (window.matchMedia('(pointer: fine)').matches) this.input.focus();
     }
 
     init() {
@@ -1170,7 +1166,7 @@ class ChatApp {
             this.library.setRemembered(this.rememberSwitch.checked);
             this.showRememberSetting(this.library.isRemembered());  // Stays off if the browser blocks storage
         });
-        this.termsManager.init();
+        this.terms.init();
         this.showRememberSetting(this.library.isRemembered());
         this.openChat(this.library.data.activeChatId);
     }

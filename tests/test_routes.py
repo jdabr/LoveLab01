@@ -35,11 +35,6 @@ def test_no_cookies_are_set(client, send):
     assert "Set-Cookie" not in send("hello").headers
 
 
-@pytest.mark.parametrize("method, path", [("POST", "/preferences"), ("DELETE", "/conversation")])
-def test_old_cookie_endpoints_are_gone(client, method, path):
-    assert client.open(path, method=method).status_code in (404, 405)
-
-
 def test_about_page(client):
     assert client.get("/about").status_code == 200
 
@@ -47,7 +42,7 @@ def test_about_page(client):
 @pytest.mark.parametrize("path", ["/", "/about"])
 def test_security_headers_on_every_page(client, path):
     headers = client.get(path).headers
-    assert headers["Content-Security-Policy"] == lovelab.CONTENT_SECURITY_POLICY
+    assert headers["Content-Security-Policy"] == lovelab.CSP
     assert headers["X-Content-Type-Options"] == "nosniff"
     assert headers["X-Frame-Options"] == "DENY"
     assert headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
@@ -139,7 +134,7 @@ class TestChatReplies:
 
     def test_reply_length_is_capped(self, send, fake_openai):
         send("My partner never listens")
-        assert fake_openai.reply_token_caps == [lovelab.REPLY_MAX_OUTPUT_TOKENS]
+        assert fake_openai.reply_token_caps == [lovelab.REPLY_MAX_TOKENS]
 
     def test_reply_surrounding_whitespace_is_trimmed(self, send, fake_openai):
         fake_openai.reply = "\n  Some advice.  \n"

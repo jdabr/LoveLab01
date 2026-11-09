@@ -46,7 +46,7 @@ FILTER_TIMEOUT = float(os.environ.get("OPENAI_FILTER_TIMEOUT", "8"))
 REPLY_TIMEOUT = float(os.environ.get("OPENAI_REPLY_TIMEOUT", "18"))
 # Hard cap on each reply's length, in tokens (including any reasoning the model does). A normal reply
 # uses a few hundred, so real replies never reach it, but it bounds what anyone can make a reply cost.
-REPLY_MAX_OUTPUT_TOKENS = int(os.environ.get("OPENAI_REPLY_MAX_TOKENS", "4000"))
+REPLY_MAX_TOKENS = int(os.environ.get("OPENAI_REPLY_MAX_TOKENS", "4000"))
 
 # Limits that bound OpenAI cost per request
 MAX_MESSAGE_LENGTH = 1000
@@ -60,8 +60,8 @@ REMEMBER_DAYS = 30
 HISTORY_TOKEN_MAX_AGE = datetime.timedelta(days=REMEMBER_DAYS + 1)
 
 # Column sizes for stored chat logs; longer messages are truncated before saving
-LOGGED_USER_MESSAGE_LENGTH = 255
-LOGGED_ASSISTANT_MESSAGE_LENGTH = 3000
+LOGGED_USER_CHARS = 255
+LOGGED_REPLY_CHARS = 3000
 
 # Only these roles from a chat's history are ever sent to the model.
 # Anything else (e.g. a forged "system"/"developer" message) is dropped.
@@ -88,7 +88,7 @@ HSTS_HEADER = "max-age=31536000"  # One year
 
 # Content-Security-Policy: the browser may only load scripts, styles and data from this site itself,
 # so even if an injection bug ever let someone insert a <script> tag, the browser would refuse to run it.
-CONTENT_SECURITY_POLICY = "; ".join([
+CSP = "; ".join([
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
@@ -102,7 +102,7 @@ CONTENT_SECURITY_POLICY = "; ".join([
 
 # ── Prompts and fixed replies ──
 
-ASSISTANT_INSTRUCTIONS = """You are LoveLab, an empathetic AI assistant helping users navigate
+REPLY_INSTRUCTIONS = """You are LoveLab, an empathetic AI assistant helping users navigate
 personal relationships and interpersonal dynamics. Respond warmly and without judgment,
 using reflective listening before offering advice. Gently reframe negative thought patterns
 and offer practical, grounded guidance. Ask one thoughtful follow-up question if the user
@@ -174,13 +174,10 @@ RATE_LIMITED_REPLY = "You're sending messages a little too quickly. Please wait 
 
 
 def database_uri():
-    """Pick the database URI for the current environment."""
-    if ENV == "dev":
-        return os.environ.get("DATABASE_URL", "postgresql://postgres:lovelab1@localhost/LoveLab")
-
-    # PG_URI is a manually set config var ("user:password@host:port/dbname").
-    # If it's removed, fall back to DATABASE_URL, which Heroku Postgres sets and keeps up to date
-    # automatically (including after credential rotation).
+    """The database to use: PG_URI if it's set, otherwise DATABASE_URL."""
+    # PG_URI is a manually set config var ("user:password@host:port/dbname"). Without it, DATABASE_URL is
+    # used, which Heroku Postgres sets and keeps up to date automatically (including after credential
+    # rotation). Locally, DATABASE_URL comes from your .env file.
     pg_uri = os.environ.get("PG_URI")
     if pg_uri:
         return f"postgresql://{pg_uri}"
@@ -191,18 +188,14 @@ def database_uri():
     raise RuntimeError("No database configured: set DATABASE_URL (or PG_URI)")
 
 
-# Placeholder keys that have appeared in this repository; anyone could use them to forge history tokens
-PLACEHOLDER_SECRET_KEYS = {"your_secret_key", "change-me"}
-MIN_SECRET_KEY_LENGTH = 16
-
-
 def secret_key():
     """The key that signs history tokens. Production refuses to start without a real one.
 
     Locally, a random key is used if none is set (the AI then forgets existing chats when the app restarts).
     """
     key = os.environ.get("SECRET_KEY")
-    if ENV != "dev" and (not key or key in PLACEHOLDER_SECRET_KEYS or len(key) < MIN_SECRET_KEY_LENGTH):
+    # The two placeholders have appeared in this repository, so anyone could use them to forge history tokens
+    if ENV != "dev" and (not key or len(key) < 16 or key in {"your_secret_key", "change-me"}):
         raise RuntimeError(
             "SECRET_KEY must be set to a long random value in production. Generate one with: "
             "python -c \"import secrets; print(secrets.token_hex(32))\""
@@ -215,14 +208,13 @@ def secret_key():
 
 # ── App setup ──
 
-app = Flask(__name__, static_url_path="/static", static_folder="static")
+app = Flask(__name__)
 
 # Heroku's router sits in front of the app and sets X-Forwarded-For / X-Forwarded-Proto.
 # Trust exactly one proxy hop so request.remote_addr is the real client IP and can't be spoofed via headers.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = database_uri()
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 # Check pooled connections before use (Heroku Postgres can drop idle ones), and give up quickly when the
 # database can't be reached, so a database problem never holds up a visitor's reply
 engine_options = {"pool_pre_ping": True}
@@ -231,10 +223,6 @@ if app.config["SQLALCHEMY_DATABASE_URI"].startswith("postgresql"):
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = engine_options
 
 app.secret_key = secret_key()
-
-app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = ENV != "dev"  # HTTPS-only cookies in production
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024  # Reject oversized request bodies
 
 limiter = Limiter(
@@ -266,8 +254,8 @@ migrate = Migrate(app, db)
 class ChatLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, nullable=False)
-    user_message = db.Column(db.String(LOGGED_USER_MESSAGE_LENGTH), nullable=False)
-    assistant_message = db.Column(db.String(LOGGED_ASSISTANT_MESSAGE_LENGTH), nullable=False)
+    user_message = db.Column(db.String(LOGGED_USER_CHARS), nullable=False)
+    assistant_message = db.Column(db.String(LOGGED_REPLY_CHARS), nullable=False)
     visitor_id = db.Column(db.String(16))  # Anonymous per-day ID, never the IP address (see ChatLogger)
 
 
@@ -328,15 +316,15 @@ class ChatAssistant:
         response = self._create(
             REPLY_TIMEOUT,
             model=OPENAI_MODEL,
-            instructions=ASSISTANT_INSTRUCTIONS,
+            instructions=REPLY_INSTRUCTIONS,
             input=conversation,
-            max_output_tokens=REPLY_MAX_OUTPUT_TOKENS,
+            max_output_tokens=REPLY_MAX_TOKENS,
         )
-        reply = response.output_text.strip()
-        if not reply:
+        text = response.output_text.strip()
+        if not text:
             raise EmptyReplyError(f"No reply text (status: {getattr(response, 'status', None)}, "
                                   f"details: {getattr(response, 'incomplete_details', None)})")
-        return reply
+        return text
 
 
 # Logs are kept anonymous:
@@ -409,8 +397,8 @@ class ChatLogger:
         chat_log = ChatLog(
             # Stored in UTC (without timezone info), matching the UTC day used for visitor IDs
             timestamp=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
-            user_message=self.storable(user_message, LOGGED_USER_MESSAGE_LENGTH),
-            assistant_message=self.storable(assistant_message, LOGGED_ASSISTANT_MESSAGE_LENGTH),
+            user_message=self.storable(user_message, LOGGED_USER_CHARS),
+            assistant_message=self.storable(assistant_message, LOGGED_REPLY_CHARS),
             visitor_id=self.visitor_id(ip_address),
         )
         self.db.session.add(chat_log)
@@ -505,13 +493,13 @@ def redirect_to_https():
 
 
 @app.before_request
-def forget_yesterdays_visitor_secret():
+def forget_old_secret():
     # Memory only, so page loads never wait on the database (see ChatLogger for when the database copy goes)
     chat_logger.forget_stale_secret()
 
 
 @app.cli.command("purge-visitor-salts")
-def purge_visitor_salts_command():
+def purge_visitor_salts():
     """Delete visitor-ID secrets from earlier days. Schedule daily (e.g. Heroku Scheduler, 00:30 UTC)."""
     deleted = chat_logger.delete_expired_salts()
     print(f"Deleted {deleted} expired visitor secret(s).")
@@ -519,7 +507,7 @@ def purge_visitor_salts_command():
 
 @app.cli.command("scrub-old-logs")
 @click.option("--dry-run", is_flag=True, help="Only count the messages that would change.")
-def scrub_old_logs_command(dry_run):
+def scrub_old_logs(dry_run):
     """Remove contact details from stored messages, including ones logged before scrubbing existed.
 
     Safe to run more than once: messages that are already scrubbed aren't changed.
@@ -531,8 +519,8 @@ def scrub_old_logs_command(dry_run):
             break
         for row in rows:
             total += 1
-            user = ChatLogger.storable(row.user_message, LOGGED_USER_MESSAGE_LENGTH)
-            assistant = ChatLogger.storable(row.assistant_message, LOGGED_ASSISTANT_MESSAGE_LENGTH)
+            user = ChatLogger.storable(row.user_message, LOGGED_USER_CHARS)
+            assistant = ChatLogger.storable(row.assistant_message, LOGGED_REPLY_CHARS)
             if (user, assistant) != (row.user_message, row.assistant_message):
                 changed += 1
                 if not dry_run:
@@ -556,7 +544,7 @@ def scrub_old_logs_command(dry_run):
 
 @app.after_request
 def set_security_headers(response):
-    response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+    response.headers["Content-Security-Policy"] = CSP
     response.headers["X-Content-Type-Options"] = "nosniff"  # Browsers must respect declared content types
     response.headers["X-Frame-Options"] = "DENY"  # Block embedding the site in other pages (clickjacking)
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"

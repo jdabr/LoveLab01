@@ -35,11 +35,11 @@ def test_contact_details_are_scrubbed_before_saving(send, fake_openai):
 
 
 def test_messages_are_truncated_to_column_sizes(send, fake_openai):
-    fake_openai.reply = "r" * (lovelab.LOGGED_ASSISTANT_MESSAGE_LENGTH + 50)
+    fake_openai.reply = "r" * (lovelab.LOGGED_REPLY_CHARS + 50)
     send("u" * lovelab.MAX_MESSAGE_LENGTH)
     [row] = logged_rows()
-    assert len(row.user_message) == lovelab.LOGGED_USER_MESSAGE_LENGTH
-    assert len(row.assistant_message) == lovelab.LOGGED_ASSISTANT_MESSAGE_LENGTH
+    assert len(row.user_message) == lovelab.LOGGED_USER_CHARS
+    assert len(row.assistant_message) == lovelab.LOGGED_REPLY_CHARS
 
 
 def test_ip_address_is_never_stored(send):

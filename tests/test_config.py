@@ -29,10 +29,9 @@ def test_missing_database_fails_loudly(prod):
         lovelab.database_uri()
 
 
-def test_dev_uses_database_url(monkeypatch):
-    monkeypatch.setattr(lovelab, "ENV", "dev")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://local/db")
-    assert lovelab.database_uri() == "postgresql://local/db"
+def test_other_database_urls_are_used_as_they_are(prod):
+    prod.setenv("DATABASE_URL", "sqlite:///lovelab.db")
+    assert lovelab.database_uri() == "sqlite:///lovelab.db"
 
 
 class TestSecretKey:
