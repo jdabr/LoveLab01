@@ -40,8 +40,7 @@ load_dotenv()
 # set LOVELAB_ENV=dev in your local .env file; defaults to prod so deployments are unaffected
 ENV = os.environ.get("LOVELAB_ENV", "prod")
 
-# OpenAI model used for the reply.
-# o4-mini was shut down by OpenAI on 2026-10-23; override with the OPENAI_MODEL env var when models are retired.
+# OpenAI model used for the reply. Set the OPENAI_MODEL config var to switch when OpenAI retires a model.
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-terra")
 # The topic filter only needs a one-word answer, so a smaller, faster model can be used for it.
 OPENAI_FILTER_MODEL = os.environ.get("OPENAI_FILTER_MODEL", OPENAI_MODEL)
@@ -92,6 +91,15 @@ RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI") or os.environ.ge
 # tells browsers to use HTTPS for this site from then on, so messages never travel unencrypted.
 ENFORCE_HTTPS = ENV != "dev"
 HSTS_HEADER = "max-age=31536000"  # One year
+
+# Replies are streamed (sent as they're written) as newline-delimited JSON when the browser asks for it
+STREAM_MIMETYPE = "application/x-ndjson"
+
+# Under a reply, the browser can suggest follow-ups such as "Help me see their side". Only advice gets
+# them: shorter replies are usually LoveLab asking about their situation first, and a reply that shares
+# crisis resources should keep the focus on getting help.
+FOLLOW_UP_MIN_WORDS = 70
+CRISIS_RESOURCES = re.compile(r"\b(?:911|988)\b|799-7233|findahelpline", re.IGNORECASE)
 
 # Content-Security-Policy: the browser may only load scripts, styles and data from this site itself,
 # so even if an injection bug ever let someone insert a <script> tag, the browser would refuse to run it.
@@ -275,7 +283,7 @@ app.config["COMPRESS_MIMETYPES"] = ["text/html", "text/css", "text/javascript", 
 Compress(app)
 
 db = SQLAlchemy(app)
-migrate = Migrate(app, db)
+Migrate(app, db)  # Adds the `flask db` commands, used to update the database on each deploy
 
 
 # ── Models ──
@@ -408,7 +416,7 @@ class ChatAssistant:
         on_usage, if given, is called with the tokens the reply used once it's finished.
         """
         status = details = None
-        wrote = False
+        wrote_text = False
         stream = self._create(
             REPLY_TIMEOUT,
             model=OPENAI_MODEL,
@@ -420,7 +428,7 @@ class ChatAssistant:
         with stream:  # Leaving early (e.g. the visitor closed the page) closes it, so the model stops writing
             for event in stream:
                 if event.type == "response.output_text.delta":
-                    wrote = wrote or bool(event.delta.strip())
+                    wrote_text = wrote_text or bool(event.delta.strip())
                     yield event.delta
                 elif event.type in ("response.completed", "response.incomplete"):
                     status, details = event.response.status, event.response.incomplete_details
@@ -430,14 +438,15 @@ class ChatAssistant:
                     raise RuntimeError(f"Reply failed: {getattr(event.response, 'error', None)}")
                 elif event.type == "error":
                     raise RuntimeError(f"Reply failed: {event.message}")
-        if not wrote:
+        if not wrote_text:
             raise EmptyReplyError(f"No reply text (status: {status}, details: {details})")
 
 
 # Logs are kept anonymous:
 # - IP addresses are never stored. Each visitor gets a "visitor ID" made by HMAC-hashing their IP with a
-#   random secret that changes every day (UTC). Messages from the same visitor on the same day share an ID.
-# - Each day's secret is deleted once a new day starts, after which nobody (including us) can link that
+#   salt: a random secret that changes every day (UTC). Messages from the same visitor on the same day
+#   share an ID.
+# - Each day's salt is deleted once a new day starts, after which nobody (including us) can link that
 #   day's IDs back to an IP address or to the same visitor on another day. The database copy is deleted
 #   when the new day's first message is logged, and by the `flask purge-visitor-salts` command, run daily
 #   by Heroku Scheduler so it also happens when nobody chats. Each process also forgets its in-memory copy
@@ -447,9 +456,8 @@ class ChatAssistant:
 class ChatLogger:
     """Saves anonymized chat messages to the database, and keeps a summary of each finished day."""
 
-    def __init__(self, db):
-        self.db = db
-        self._cached_salt = (None, None)  # (day, secret) so the DB is only asked once per day per process
+    def __init__(self):
+        self._cached_salt = (None, None)  # (day, salt) so the DB is only asked once per day per process
         self._summarized_day = None
 
     @staticmethod
@@ -465,57 +473,54 @@ class ChatLogger:
         return scrub_contact_details(text.replace("\x00", ""))[:max_length]
 
     def delete_expired_salts(self):
-        """Destroy earlier days' secrets so past visitor IDs can never be traced back. Returns how many."""
-        today = self._today()
-        deleted = VisitorSalt.query.filter(VisitorSalt.day < today).delete()
-        self.db.session.commit()
-        self.forget_stale_secret()
+        """Destroy earlier days' salts so past visitor IDs can never be traced back. Returns how many."""
+        deleted = VisitorSalt.query.filter(VisitorSalt.day < self._today()).delete()
+        db.session.commit()
+        self.forget_stale_salt()
         return deleted
 
-    def forget_stale_secret(self):
-        """Drop an earlier day's secret from this process's memory. Never touches the database, so it's
+    def forget_stale_salt(self):
+        """Drop an earlier day's salt from this process's memory. Never touches the database, so it's
         free to call on every request."""
         if self._cached_salt[0] not in (None, self._today()):
             self._cached_salt = (None, None)
 
-    def _daily_secret(self):
+    def _daily_salt(self):
         today = self._today()
-        cached_day, cached_secret = self._cached_salt
+        cached_day, cached_salt = self._cached_salt
         if cached_day == today:
-            return cached_secret
+            return cached_salt
 
-        row = self.db.session.get(VisitorSalt, today)
+        row = db.session.get(VisitorSalt, today)
         if row is None:
-            self.db.session.add(VisitorSalt(day=today, salt=secrets.token_hex(32)))
+            db.session.add(VisitorSalt(day=today, salt=secrets.token_hex(32)))
             try:
-                self.db.session.commit()
+                db.session.commit()
             except IntegrityError:
-                # Another worker created today's secret at the same moment; use theirs
-                self.db.session.rollback()
-            row = self.db.session.get(VisitorSalt, today)
+                # Another worker created today's salt at the same moment; use theirs
+                db.session.rollback()
+            row = db.session.get(VisitorSalt, today)
 
-        salt = row.salt
         self.delete_expired_salts()
-        self._cached_salt = (today, salt)
-        return salt
+        self._cached_salt = (today, row.salt)
+        return row.salt
 
     def visitor_id(self, ip_address):
-        digest = hmac.new(self._daily_secret().encode(), (ip_address or "").encode(), hashlib.sha256)
+        digest = hmac.new(self._daily_salt().encode(), (ip_address or "").encode(), hashlib.sha256)
         return digest.hexdigest()[:16]
 
-    def log_message(self, user_message, assistant_message, ip_address, stats=None):
+    def log_message(self, user_message, reply, ip_address, stats=None):
         """Save a message and LoveLab's reply (both None if the reply failed or the visitor left), with the
         ExchangeStats about it."""
-        chat_log = ChatLog(
+        db.session.add(ChatLog(
             # Stored in UTC (without timezone info), matching the UTC day used for visitor IDs
             timestamp=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
             user_message=self.storable(user_message, LOGGED_USER_CHARS),
-            assistant_message=self.storable(assistant_message, LOGGED_REPLY_CHARS),
+            assistant_message=self.storable(reply, LOGGED_REPLY_CHARS),
             visitor_id=self.visitor_id(ip_address),
             **(stats.columns() if stats else {}),
-        )
-        self.db.session.add(chat_log)
-        self.db.session.commit()
+        ))
+        db.session.commit()
         # The day's first message (in each process) also summarizes the days that have finished since
         if self._summarized_day != self._today():
             self._summarized_day = self._today()  # Only try once a day, even if it fails
@@ -524,27 +529,27 @@ class ChatLogger:
     def summarize_days(self):
         """Add (or refresh) the DailySummary of each finished day since the latest summary. Safe to run again.
         Returns how many days were summarized."""
-        latest = self.db.session.query(func.max(DailySummary.day)).scalar()
+        latest = db.session.query(func.max(DailySummary.day)).scalar()
         day = func.date(ChatLog.timestamp)
         answered = ChatLog.outcome == "answered"
 
         def count(condition):
             return func.coalesce(func.sum(case((condition, 1), else_=0)), 0)
 
-        query = self.db.session.query(
-            day,
-            func.count(ChatLog.id),
-            func.count(func.distinct(ChatLog.visitor_id)),
-            count(answered),
-            count(ChatLog.outcome == "off_topic"),
-            count(ChatLog.outcome == "failed"),
-            count(ChatLog.outcome == "abandoned"),
-            count(ChatLog.crisis_resources.is_(True)),
-            func.coalesce(func.sum(ChatLog.input_tokens), 0),
-            func.coalesce(func.sum(ChatLog.output_tokens), 0),
-            func.avg(case((answered, ChatLog.first_text_ms))),
-            func.avg(case((answered, ChatLog.reply_ms))),
-        ).filter(
+        totals = {
+            "messages": func.count(ChatLog.id),
+            "visitors": func.count(func.distinct(ChatLog.visitor_id)),
+            "answered": count(answered),
+            "off_topic": count(ChatLog.outcome == "off_topic"),
+            "failed": count(ChatLog.outcome == "failed"),
+            "abandoned": count(ChatLog.outcome == "abandoned"),
+            "crisis_replies": count(ChatLog.crisis_resources.is_(True)),
+            "input_tokens": func.coalesce(func.sum(ChatLog.input_tokens), 0),
+            "output_tokens": func.coalesce(func.sum(ChatLog.output_tokens), 0),
+            "avg_first_text_ms": func.avg(case((answered, ChatLog.first_text_ms))),
+            "avg_reply_ms": func.avg(case((answered, ChatLog.reply_ms))),
+        }
+        query = db.session.query(day.label("day"), *(total.label(name) for name, total in totals.items())).filter(
             ChatLog.outcome.isnot(None),  # Only rows since tracking began
             ChatLog.timestamp < datetime.datetime.combine(self._today(), datetime.time.min),  # Finished days
         )
@@ -553,18 +558,18 @@ class ChatLogger:
 
         rows = query.group_by(day).all()
         for row in rows:
-            summary_day = row[0] if isinstance(row[0], datetime.date) else datetime.date.fromisoformat(row[0])
-            self.db.session.merge(DailySummary(
-                day=summary_day, messages=row[1], visitors=row[2], answered=row[3], off_topic=row[4],
-                failed=row[5], abandoned=row[6], crisis_replies=row[7], input_tokens=row[8], output_tokens=row[9],
-                avg_first_text_ms=None if row[10] is None else round(row[10]),
-                avg_reply_ms=None if row[11] is None else round(row[11]),
-            ))
+            summary = row._asdict()
+            if isinstance(summary["day"], str):  # SQLite returns dates as text
+                summary["day"] = datetime.date.fromisoformat(summary["day"])
+            for average in ("avg_first_text_ms", "avg_reply_ms"):
+                if summary[average] is not None:
+                    summary[average] = round(summary[average])
+            db.session.merge(DailySummary(**summary))
         try:
-            self.db.session.commit()
+            db.session.commit()
         except IntegrityError:
             # Another worker summarized the same day at the same moment (with the same numbers)
-            self.db.session.rollback()
+            db.session.rollback()
         return len(rows)
 
 
@@ -615,18 +620,7 @@ if not os.environ.get("OPENAI_API"):
     raise RuntimeError("OPENAI_API environment variable is not set (add it to your .env file for local development)")
 
 chat_assistant = ChatAssistant(os.environ["OPENAI_API"])
-chat_logger = ChatLogger(db)
-
-
-# Under a reply, the browser can suggest follow-ups such as "Help me see their side". Only advice gets
-# them: shorter replies are usually LoveLab asking about their situation first, and a reply that shares
-# crisis resources should keep the focus on getting help.
-FOLLOW_UP_MIN_WORDS = 70
-CRISIS_RESOURCES = re.compile(r"\b(?:911|988)\b|799-7233|findahelpline", re.IGNORECASE)
-
-
-def offers_follow_ups(reply):
-    return len(reply.split()) >= FOLLOW_UP_MIN_WORDS and not CRISIS_RESOURCES.search(reply)
+chat_logger = ChatLogger()
 
 
 def reply_events(user_message, history_token, stats):
@@ -659,24 +653,22 @@ def reply_events(user_message, history_token, stats):
     reply = reply.strip()
     stats.crisis_resources = bool(CRISIS_RESOURCES.search(reply))
     stats.end("answered")
+    follow_ups = len(reply.split()) >= FOLLOW_UP_MIN_WORDS and not stats.crisis_resources
     new_history = conversation + [{"role": "assistant", "content": reply}]
-    yield "done", (reply, make_history_token(new_history), offers_follow_ups(reply))
+    yield "done", (reply, make_history_token(new_history), follow_ups)
 
 
-STREAM_MIMETYPE = "application/x-ndjson"
-
-
-def stream_reply(user_message, first, events, stats):
+def stream_reply(user_message, first_event, events, stats):
     """Send the reply as it's written, as newline-delimited JSON: {"text": piece} lines, then the finished
     {"message", "history", "followUps"} (the same as an unstreamed reply), or {"error": ...} if it fails
-    partway. first is reply_events' first event (already received); events is the rest. A reply that fails,
-    or that the visitor leaves, is logged without its text.
+    partway. first_event is reply_events' first event (already received); events is the rest. A reply that
+    fails, or that the visitor leaves, is logged without its text.
 
     No compression for these (see COMPRESS_MIMETYPES): they mix the visitor's text with their history.
     """
     def lines():
         try:
-            for kind, result in itertools.chain([first], events):
+            for kind, result in itertools.chain([first_event], events):
                 if kind == "text":
                     yield json.dumps({"text": result}) + "\n"
                     continue
@@ -700,12 +692,12 @@ def stream_reply(user_message, first, events, stats):
     return Response(stream_with_context(lines()), mimetype=STREAM_MIMETYPE, headers={"Cache-Control": "no-store"})
 
 
-def log_exchange(user_message, assistant_message, stats):
+def log_exchange(user_message, reply, stats):
     """Log the exchange (pass None for the texts if the reply failed or the visitor left). A logging failure
     shouldn't stop the visitor getting their reply."""
     try:
         # The IP (real client IP via ProxyFix) is only used to derive the anonymous visitor ID; it isn't stored
-        chat_logger.log_message(user_message, assistant_message, request.remote_addr, stats)
+        chat_logger.log_message(user_message, reply, request.remote_addr, stats)
     except Exception:
         db.session.rollback()
         app.logger.exception("Failed to log chat message")
@@ -723,10 +715,8 @@ def redirect_to_https():
     return None
 
 
-@app.before_request
-def forget_old_secret():
-    # Memory only, so page loads never wait on the database (see ChatLogger for when the database copy goes)
-    chat_logger.forget_stale_secret()
+# Memory only, so page loads never wait on the database (see ChatLogger for when the database copy goes)
+app.before_request(chat_logger.forget_stale_salt)
 
 
 @app.cli.command("purge-visitor-salts")
@@ -841,19 +831,19 @@ def home():
             remember_days=REMEMBER_DAYS,
         )
 
-    user_message, history, rejection = parse_chat_request()
+    user_message, history_token, rejection = parse_chat_request()
     if rejection:
         return jsonify({"message": rejection}), 400
 
     stats = ExchangeStats()
-    events = reply_events(user_message, history, stats)
+    events = reply_events(user_message, history_token, stats)
     try:
         # Wait for the topic check and the start of the reply, so a failure before then is a normal error
-        first = next(events)
+        first_event = next(events)
         if STREAM_MIMETYPE in request.headers.get("Accept", ""):
-            return stream_reply(user_message, first, events, stats)
+            return stream_reply(user_message, first_event, events, stats)
         # Not asked to stream (e.g. a page loaded before streaming existed): send the finished reply
-        kind, result = first
+        kind, result = first_event
         while kind != "done":
             kind, result = next(events)
     except Exception:

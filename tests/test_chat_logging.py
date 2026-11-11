@@ -76,14 +76,14 @@ def test_earlier_days_secrets_are_destroyed(app):
     assert [salt.day for salt in remaining] == [yesterday + datetime.timedelta(days=1)]
 
 
-def add_yesterdays_secret():
+def add_yesterdays_salt():
     yesterday = datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1)
     lovelab.db.session.add(VisitorSalt(day=yesterday, salt="old-secret"))
     lovelab.db.session.commit()
 
 
 def test_first_message_of_the_day_deletes_yesterdays_secret(send):
-    add_yesterdays_secret()
+    add_yesterdays_salt()
     send("hello")
     assert [salt.day for salt in VisitorSalt.query.all()] == [datetime.datetime.now(datetime.timezone.utc).date()]
 
@@ -102,7 +102,7 @@ def test_yesterdays_secret_is_also_forgotten_from_memory(app):
 
 def test_daily_command_deletes_old_secrets_but_keeps_todays(app):
     lovelab.chat_logger.visitor_id("203.0.113.7")  # Creates today's secret
-    add_yesterdays_secret()
+    add_yesterdays_salt()
     result = app.test_cli_runner().invoke(args=["purge-visitor-salts"])
     assert "Deleted 1 expired visitor secret(s)." in result.output
     assert [salt.day for salt in VisitorSalt.query.all()] == [datetime.datetime.now(datetime.timezone.utc).date()]
@@ -110,7 +110,7 @@ def test_daily_command_deletes_old_secrets_but_keeps_todays(app):
 
 def test_page_loads_never_touch_the_database(client):
     # So a slow or unavailable database can't slow down or break the site itself
-    add_yesterdays_secret()
+    add_yesterdays_salt()
     statements = []
     listener = lambda *args: statements.append(args[2])  # noqa: E731
     event.listen(lovelab.db.engine, "before_cursor_execute", listener)

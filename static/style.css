@@ -432,8 +432,8 @@ body {
 
 .message-action.copied { color: var(--accent); }
 
-/* After the last message: suggested follow-ups, or a way to try again */
-.chat-tail {
+/* "Next steps" after the last message: suggested follow-ups, or a way to try again */
+.next-steps {
     align-self: flex-start;
     display: flex;
     flex-wrap: wrap;

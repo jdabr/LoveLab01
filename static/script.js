@@ -315,7 +315,7 @@ async function requestReply(message, history, onText) {
         return readReplyStream(response, onText);
     }
     const data = await response.json().catch(() => null);  // Non-JSON responses (e.g. an HTML error page)
-    return finishedReply(data, response);
+    return parseFinishedReply(data, response);
 }
 
 // Reads a streamed reply: one JSON object per line, {"text"} pieces as it's written, then the finished
@@ -338,7 +338,7 @@ async function readReplyStream(response, onText) {
             } else if (typeof event.error === 'string') {
                 throw Object.assign(new Error(event.error), { userMessage: event.error });
             } else {
-                return finishedReply(event, response);
+                return parseFinishedReply(event, response);
             }
         }
         if (done) throw new Error('The reply was cut off');
@@ -346,7 +346,7 @@ async function readReplyStream(response, onText) {
 }
 
 // Checks the server's finished reply (or error) and returns { message, history, followUps }
-function finishedReply(data, response) {
+function parseFinishedReply(data, response) {
     if (!data || typeof data.message !== 'string' || !data.message.trim()) {
         throw new Error(`Server error (${response.status})`);
     }
@@ -369,7 +369,7 @@ function finishedReply(data, response) {
 //   copy, so each tab picks up the others' changes (see syncFromOtherTab).
 // Each chat also holds its signed history token: the AI's memory of that chat (see app.py).
 class ChatLibrary {
-    static KEY = 'lovelab.chats';
+    static STORAGE_KEY = 'lovelab.chats';
     static REMEMBER_KEY = 'lovelab.remember';
     static LEGACY_KEY = 'lovelab.conversation';  // Single-conversation format used before multiple chats
     static MAX_CHATS = 100;
@@ -380,7 +380,7 @@ class ChatLibrary {
         this.maxAgeMs = rememberDays * 24 * 60 * 60 * 1000;
         this.onSaveFailed = null;  // Called when the browser refuses to save, usually because its storage is full
         for (const name of ['sessionStorage', 'localStorage']) getStorage(name)?.removeItem(ChatLibrary.LEGACY_KEY);
-        this.remembered = this.isRemembered();
+        this.wasRemembered = this.isRemembered();
         this.data = this.read();
         this.pruneExpired();
     }
@@ -398,7 +398,7 @@ class ChatLibrary {
     read() {
         const empty = { people: [], chats: [], activeChatId: null };
         try {
-            const saved = JSON.parse(this.storage()?.getItem(ChatLibrary.KEY) ?? 'null');
+            const saved = JSON.parse(this.storage()?.getItem(ChatLibrary.STORAGE_KEY) ?? 'null');
             if (!saved || !Array.isArray(saved.people) || !Array.isArray(saved.chats)) return empty;
             const people = saved.people.filter(p => p && typeof p.id === 'string' && typeof p.name === 'string');
             const personIds = new Set(people.map(p => p.id));
@@ -416,7 +416,7 @@ class ChatLibrary {
 
     persist() {
         try {
-            this.storage()?.setItem(ChatLibrary.KEY, JSON.stringify(this.data));
+            this.storage()?.setItem(ChatLibrary.STORAGE_KEY, JSON.stringify(this.data));
         } catch (e) {
             this.onSaveFailed?.();
         }
@@ -438,38 +438,38 @@ class ChatLibrary {
         const local = getStorage('localStorage');
         if (remember) {
             try {
-                local?.setItem(ChatLibrary.KEY, JSON.stringify(this.data));
+                local?.setItem(ChatLibrary.STORAGE_KEY, JSON.stringify(this.data));
                 local?.setItem(ChatLibrary.REMEMBER_KEY, 'on');
-                getStorage('sessionStorage')?.removeItem(ChatLibrary.KEY);
+                getStorage('sessionStorage')?.removeItem(ChatLibrary.STORAGE_KEY);
             } catch (e) {
                 // Couldn't save (e.g. storage full): leave Remember off and keep this tab's copy
                 local?.removeItem(ChatLibrary.REMEMBER_KEY);
-                local?.removeItem(ChatLibrary.KEY);
+                local?.removeItem(ChatLibrary.STORAGE_KEY);
                 this.onSaveFailed?.();
             }
         } else {
             local?.removeItem(ChatLibrary.REMEMBER_KEY);
-            local?.removeItem(ChatLibrary.KEY);
+            local?.removeItem(ChatLibrary.STORAGE_KEY);
             this.persist();  // Into this tab's sessionStorage
         }
-        this.remembered = this.isRemembered();
+        this.wasRemembered = this.isRemembered();
     }
 
     // Another tab changed the saved chats or the Remember setting. Without this, each tab would save over
     // the other's changes.
     syncFromOtherTab() {
         const remembered = this.isRemembered();
-        if (remembered && !this.remembered) {
+        if (remembered && !this.wasRemembered) {
             // Another tab turned Remember on: keep this tab's chats as well as theirs
             this.data = ChatLibrary.merge(this.read(), this.data);
             this.persist();
         } else if (remembered) {
             this.data = this.read();  // The tabs share one copy: take the latest
-        } else if (this.remembered) {
+        } else if (this.wasRemembered) {
             // Another tab turned Remember off: like theirs, this tab's chats now last until it's closed
             this.persist();
         }
-        this.remembered = remembered;
+        this.wasRemembered = remembered;
     }
 
     // Combines two libraries, keeping the most recently updated version of anything that's in both
@@ -588,7 +588,7 @@ function crisisLink(text) {
 }
 
 // Adds plain text to parent, turning crisis resources into links
-function appendText(parent, text) {
+function appendLinkedText(parent, text) {
     let last = 0;
     for (const match of text.matchAll(CRISIS_RESOURCES)) {
         if (match.index > last) parent.append(text.slice(last, match.index));
@@ -605,16 +605,16 @@ function appendText(parent, text) {
 }
 
 // Adds text to parent, turning **bold** and *italic* into <strong> and <em>
-function appendInline(parent, text) {
+function appendFormattedText(parent, text) {
     const pattern = /\*\*(.+?)\*\*|\*(\S(?:.*?\S)?)\*/g;
     let last = 0;
     for (const match of text.matchAll(pattern)) {
-        if (match.index > last) appendText(parent, text.slice(last, match.index));
+        if (match.index > last) appendLinkedText(parent, text.slice(last, match.index));
         const emphasis = parent.appendChild(createElement(match[1] !== undefined ? 'strong' : 'em'));
-        appendText(emphasis, match[1] ?? match[2]);
+        appendLinkedText(emphasis, match[1] ?? match[2]);
         last = match.index + match[0].length;
     }
-    if (last < text.length) appendText(parent, text.slice(last));
+    if (last < text.length) appendLinkedText(parent, text.slice(last));
 }
 
 // A reply as plain text, for copying: list markers stay, but the **bold**, *italic* and # heading marks go
@@ -686,18 +686,18 @@ function renderRichText(container, text) {
                 list = container.appendChild(createElement(tag.toLowerCase()));
                 if (numbered && numbered[1] !== '1') list.start = Number(numbered[1]);
             }
-            appendInline(list.appendChild(createElement('li')), bullet ? bullet[1] : numbered[2]);
+            appendFormattedText(list.appendChild(createElement('li')), bullet ? bullet[1] : numbered[2]);
             paragraph = null;
         } else if (heading) {
             paragraph = list = null;
-            appendInline(container.appendChild(createElement('p', 'reply-heading')), heading[1]);
+            appendFormattedText(container.appendChild(createElement('p', 'reply-heading')), heading[1]);
         } else if (paragraph) {
             paragraph.append(document.createElement('br'));
-            appendInline(paragraph, line);
+            appendFormattedText(paragraph, line);
         } else {
             list = null;
             paragraph = container.appendChild(createElement('p'));
-            appendInline(paragraph, line);
+            appendFormattedText(paragraph, line);
         }
     }
 }
@@ -777,7 +777,7 @@ const MAX_NAME_LENGTH = 40;
 
 // Example questions shown in an empty chat, matched to who the chat is about. The AI isn't told the
 // relationship; these are just conversation starters.
-const SUGGESTIONS = {
+const EXAMPLE_QUESTIONS = {
     General: [
         'How do I make new friends as an adult?',
         'How can I set boundaries without feeling guilty?',
@@ -937,7 +937,7 @@ class ChatApp {
     fetchReply(chatId, userMessage) {
         this.setPending(chatId);
         this.renderSidebar();
-        this.followingReply = true;
+        this.autoScroll = true;
         requestReply(userMessage, this.library.getChat(chatId).history, text => this.showPartialReply(chatId, text))
             .then(({ message, history, followUps }) => {
                 this.library.addMessage(chatId, 'assistant', message, followUps ? { followUps } : {});
@@ -962,7 +962,7 @@ class ChatApp {
             })
             .finally(() => {
                 this.setPending(null);
-                if (this.current.chatId === chatId) this.renderTail();
+                if (this.current.chatId === chatId) this.renderNextSteps();
                 this.renderSidebar();
                 this.focusInput();
             });
@@ -973,12 +973,12 @@ class ChatApp {
     // Shows the reply so far in place of the typing dots, redrawing at most once per frame. Only while its
     // chat is open; switching back mid-reply picks up where it's got to.
     showPartialReply(chatId, text) {
-        const partial = this.partial ??= { bubble: null, frame: 0 };
+        const partial = this.partialReply ??= { bubble: null, frame: 0 };
         partial.text = text;
         if (partial.frame || this.current.chatId !== chatId) return;
         partial.frame = requestAnimationFrame(() => {
             partial.frame = 0;
-            if (this.partial !== partial || this.current.chatId !== chatId) return;
+            if (this.partialReply !== partial || this.current.chatId !== chatId) return;
             if (!partial.bubble?.isConnected) {  // The first piece, or the chat was redrawn
                 this.hideThinking();
                 partial.bubble = createElement('div', 'message assistant-message streaming');
@@ -987,7 +987,7 @@ class ChatApp {
             partial.bubble.replaceChildren();
             renderRichText(partial.bubble, closeOpenBold(partial.text));
             appendCaret(partial.bubble);
-            if (this.followingReply) scrollToMessage(this.messageContainer, partial.bubble);
+            if (this.autoScroll) scrollToMessage(this.messageContainer, partial.bubble);
         });
     }
 
@@ -1003,13 +1003,13 @@ class ChatApp {
         bubble.replaceChildren();
         renderRichText(bubble, message);
         bubble.after(this.createReplyActions(message));
-        if (this.followingReply) scrollToMessage(this.messageContainer, bubble);
+        if (this.autoScroll) scrollToMessage(this.messageContainer, bubble);
     }
 
     // Stops drawing the reply in progress, and returns its bubble (if one was shown)
     endPartialReply() {
-        const partial = this.partial;
-        this.partial = null;
+        const partial = this.partialReply;
+        this.partialReply = null;
         if (partial?.frame) cancelAnimationFrame(partial.frame);
         return partial?.bubble ?? null;
     }
@@ -1020,44 +1020,42 @@ class ChatApp {
         const last = chat?.messages.at(-1);
         if (this.pendingChatId || last?.role !== 'user') return;
         this.messageContainer.querySelectorAll('.error-message').forEach(element => element.remove());
-        this.clearTail();
+        this.clearNextSteps();
         this.fetchReply(chat.id, last.content);
     }
 
-    // What comes after the chat's last message: suggested follow-ups under advice, or a way to try again
-    // when the last message got no reply (shown again after a refresh, since errors aren't saved)
-    renderTail() {
-        this.clearTail();
+    // The "next steps" under the chat's last message: suggested follow-ups under advice, or a way to try
+    // again when the last message got no reply (shown again after a refresh, since errors aren't saved)
+    renderNextSteps() {
+        this.clearNextSteps();
         const chat = this.library.getChat(this.current.chatId);
         const last = chat?.messages.at(-1);
         if (!last || chat.id === this.pendingChatId) return;
 
-        let tail;
+        const nextSteps = createElement('div', 'next-steps');
         if (last.role === 'user') {
-            tail = createElement('div', 'chat-tail');
-            tail.append(createElement('span', 'retry-note', 'LoveLab couldn\'t reply to this.'),
+            nextSteps.append(createElement('span', 'retry-note', 'LoveLab couldn\'t reply to this.'),
                 createButton('text-button', 'Try again', () => this.retry()));
         } else if (last.followUps) {
             // Never suggest something the visitor has already asked in this chat (clicked or typed)
             const asked = new Set(chat.messages.filter(m => m.role === 'user').map(m => m.content.trim().toLowerCase()));
-            const fresh = FOLLOW_UPS.filter(question => !asked.has(question.toLowerCase()));
-            if (!fresh.length) return;
-            tail = createElement('div', 'chat-tail');
-            tail.setAttribute('role', 'group');
-            tail.setAttribute('aria-label', 'Suggested follow-ups');
-            fresh.forEach(text => tail.append(createButton('follow-up', text, () => this.send(text))));
+            const notAsked = FOLLOW_UPS.filter(question => !asked.has(question.toLowerCase()));
+            if (!notAsked.length) return;
+            nextSteps.setAttribute('role', 'group');
+            nextSteps.setAttribute('aria-label', 'Suggested follow-ups');
+            notAsked.forEach(text => nextSteps.append(createButton('follow-up', text, () => this.send(text))));
         } else {
             return;
         }
         // Keep it in view, unless the visitor has scrolled up to read
         const container = this.messageContainer;
         const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 48;
-        container.append(tail);
+        container.append(nextSteps);
         if (atBottom) container.scrollTop = container.scrollHeight;
     }
 
-    clearTail() {
-        this.messageContainer.querySelector('.chat-tail')?.remove();
+    clearNextSteps() {
+        this.messageContainer.querySelector('.next-steps')?.remove();
     }
 
     // Screen readers read out each reply as it arrives. (The message list itself isn't a live region, or
@@ -1092,7 +1090,7 @@ class ChatApp {
 
     addMessage(role, content, isError = false) {
         this.showEmptyState(false);
-        this.clearTail();  // A new message replaces any follow-ups or "Try again" under the last one
+        this.clearNextSteps();  // A new message replaces any follow-ups or "Try again" under the last one
         const actions = role === 'assistant' && !isError ? this.createReplyActions(content) : null;
         new Message(role, content, isError).display(this.messageContainer, actions);
     }
@@ -1127,7 +1125,7 @@ class ChatApp {
         if (!show) return;
         const person = this.library.getPerson(this.current.personId);
         this.emptyTitle.textContent = person ? `What's going on with ${person.name}?` : "What's on your mind?";
-        const questions = SUGGESTIONS[person?.relationship] ?? SUGGESTIONS.General;
+        const questions = EXAMPLE_QUESTIONS[person?.relationship] ?? EXAMPLE_QUESTIONS.General;
         this.suggestions.replaceChildren(...questions.map(question => {
             const button = createElement('button', 'suggestion', question);
             button.type = 'button';
@@ -1167,18 +1165,20 @@ class ChatApp {
 
     // Shows a chat's saved messages, or the greeting if it has none
     renderMessages(chat) {
-        [...this.messageContainer.children].forEach(element => element !== this.emptyState && element.remove());
+        for (const element of [...this.messageContainer.children]) {
+            if (element !== this.emptyState) element.remove();
+        }
         this.showEmptyState(!chat?.messages.length);
         chat?.messages.forEach(({ role, content }) => this.addMessage(role, content));
         if (chat && chat.id === this.pendingChatId) this.showThinking();
-        this.renderTail();
+        this.renderNextSteps();
     }
 
     // Another tab changed the saved chats: catch up without disturbing anything being typed here
     handleStorageEvent(event) {
         const local = getStorage('localStorage');
         if (!local || event.storageArea !== local) return;
-        if (![ChatLibrary.KEY, ChatLibrary.REMEMBER_KEY, null].includes(event.key)) return;  // null: storage cleared
+        if (![ChatLibrary.STORAGE_KEY, ChatLibrary.REMEMBER_KEY, null].includes(event.key)) return;  // null: storage cleared
 
         this.library.syncFromOtherTab();
         this.showRememberSetting(this.library.isRemembered());
@@ -1346,15 +1346,15 @@ class ChatApp {
     renderGroup(person, chats) {
         const group = createElement('section', 'person-group');
         const personId = person?.id ?? null;
+        const name = person ? person.name : 'General';
         const row = createElement('div', 'person-row');
         if (personId === this.current.personId && !this.current.chatId) row.classList.add('active');
 
         const label = createElement('span', 'person-label');
-        label.append(createElement('span', 'person-name', person ? person.name : 'General'));
+        label.append(createElement('span', 'person-name', name));
         if (person?.relationship) label.append(createElement('span', 'person-relationship', person.relationship));
         row.append(createAvatar(person), label);
 
-        const name = person ? person.name : 'General';
         const newChat = createButton('icon-button', '＋');
         Object.assign(newChat.dataset, { action: 'new-chat', personId: personId ?? '' });
         newChat.setAttribute('aria-label', `New chat about ${name}`);
@@ -1419,7 +1419,7 @@ class ChatApp {
         this.suggestions.addEventListener('click', (e) => this.useSuggestion(e));
         // Once the visitor scrolls while a reply is being written, stop scrolling it for them
         for (const type of ['wheel', 'touchmove']) {
-            this.messageContainer.addEventListener(type, () => { this.followingReply = false; }, { passive: true });
+            this.messageContainer.addEventListener(type, () => { this.autoScroll = false; }, { passive: true });
         }
         window.addEventListener('storage', (e) => this.handleStorageEvent(e));
         this.rememberSwitch.addEventListener('change', () => {
