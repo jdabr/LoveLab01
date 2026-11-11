@@ -221,6 +221,15 @@ class TestFollowUps:
         fake_openai.reply = "Hi! What's been on your mind lately?"
         assert send("hi").json["followUps"] is False
 
+    def test_focused_questions_before_advice_do_not(self, send, fake_openai):
+        # Asking about their situation first can run past 300 characters, but it isn't advice yet
+        fake_openai.reply = ("That sounds really draining, especially when the same fights keep coming back and "
+                             "you can't seem to get past them. I'd like to understand it a little better before "
+                             "suggesting anything: what do the fights usually start over, and how do they tend "
+                             "to end? Is this something new between you two, or has it been building for a while?")
+        assert len(fake_openai.reply) > 300 and len(fake_openai.reply.split()) < lovelab.FOLLOW_UP_MIN_WORDS
+        assert send("My partner and I keep fighting").json["followUps"] is False
+
     def test_off_topic_replies_do_not(self, send, fake_openai):
         fake_openai.verdict = "NO"
         assert send("What's the weather?").json["followUps"] is False
@@ -242,3 +251,10 @@ def test_replies_teach_approaches_rather_than_supply_wording():
     rules = " ".join(lovelab.REPLY_INSTRUCTIONS.lower().split())  # Ignore line wrapping
     assert "never write out words, phrases or quotes" in rules
     assert "never write messages, texts, emails or scripts" in rules
+
+
+def test_replies_are_personal_short_and_conversational():
+    rules = " ".join(lovelab.REPLY_INSTRUCTIONS.lower().split())
+    assert "reflect the specific details they've shared" in rules
+    assert "ask one or two focused questions about their situation before giving advice" in rules
+    assert "usually 80 to 150 words, and never more than 200" in rules
