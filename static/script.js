@@ -591,6 +591,25 @@ function toPlainText(text) {
         .replace(/\*(\S(?:.*?\S)?)\*/g, '$1')).join('\n').trim();
 }
 
+// Small line icons, drawn as SVG (not loaded as images) so they take the colour of the text around them
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const ICONS = {
+    copy: [['rect', { x: 8, y: 8, width: 14, height: 14, rx: 2 }],
+        ['path', { d: 'M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2' }]],
+    check: [['path', { d: 'M20 6 9 17l-5-5' }]],
+    cross: [['path', { d: 'M18 6 6 18M6 6l12 12' }]],
+};
+
+function createIcon(name) {
+    const setAttributes = (element, attributes) =>
+        Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    setAttributes(svg, { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor',
+        'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' });
+    ICONS[name].forEach(([tag, attributes]) => setAttributes(svg.appendChild(document.createElementNS(SVG_NS, tag)), attributes));
+    return svg;
+}
+
 // Copies text to the clipboard. Resolves to true if it worked.
 async function copyText(text) {
     try {
@@ -978,16 +997,26 @@ class ChatApp {
         new Message(role, content, isError).display(this.messageContainer, actions);
     }
 
-    // The row under each reply, with a button to copy it (e.g. a message LoveLab wrote to send)
+    // The row under each reply, with a button to copy it (e.g. a message LoveLab wrote to send). The icon
+    // briefly turns into a checkmark (or a cross, if copying failed).
     createReplyActions(reply) {
         const row = createElement('div', 'message-actions');
-        const copy = createButton('message-action', 'Copy', async () => {
+        const copy = createButton('message-action', '', async () => {
             const copied = await copyText(toPlainText(reply));
-            copy.textContent = copied ? 'Copied' : 'Couldn\'t copy';
+            show(copied ? 'check' : 'cross', copied ? 'Copied' : 'Couldn\'t copy');
+            copy.classList.toggle('copied', copied);
             clearTimeout(copy.resetTimer);
-            copy.resetTimer = setTimeout(() => { copy.textContent = 'Copy'; }, 2000);
+            copy.resetTimer = setTimeout(() => {
+                show('copy', 'Copy this reply');
+                copy.classList.remove('copied');
+            }, 2000);
         });
-        copy.setAttribute('aria-label', 'Copy this reply');
+        const show = (icon, label) => {
+            copy.replaceChildren(createIcon(icon));
+            copy.setAttribute('aria-label', label);
+            copy.title = label;
+        };
+        show('copy', 'Copy this reply');
         row.append(copy);
         return row;
     }

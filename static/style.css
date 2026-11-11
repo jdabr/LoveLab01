@@ -391,20 +391,30 @@ body {
 }
 
 .message-action {
-    padding: 0.2rem 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
     border: none;
     border-radius: 0.4rem;
     background: none;
     color: var(--text-secondary);
-    font: inherit;
-    font-size: 0.78rem;
     cursor: pointer;
+}
+
+.message-action svg {
+    width: 0.95rem;
+    height: 0.95rem;
 }
 
 .message-action:hover {
     background-color: var(--bg-secondary);
     color: var(--text-primary);
 }
+
+.message-action.copied { color: var(--accent); }
 
 /* After the last message: suggested follow-ups, or a way to try again */
 .chat-tail {
