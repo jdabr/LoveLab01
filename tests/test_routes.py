@@ -235,3 +235,8 @@ class TestFollowUps:
 
 def test_crisis_resources_cover_other_countries():
     assert "findahelpline.com" in lovelab.REPLY_INSTRUCTIONS
+
+
+def test_replies_advise_rather_than_write_messages_for_people():
+    # LoveLab lays out options and helps people find their own words; it doesn't ghostwrite
+    assert "Never write messages, texts," in lovelab.REPLY_INSTRUCTIONS

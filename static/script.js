@@ -776,7 +776,7 @@ function firstCharacter(text) {
 }
 
 // Suggested next questions under a reply that gives advice (the server decides which replies get them)
-const FOLLOW_UPS = ['Write a message I could send', 'What if it doesn\'t go well?', 'Help me see their side'];
+const FOLLOW_UPS = ['What if it doesn\'t go well?', 'Help me see their side'];
 
 // A round badge with the person's initial, coloured consistently from their id
 function createAvatar(person) {
@@ -997,7 +997,7 @@ class ChatApp {
         new Message(role, content, isError).display(this.messageContainer, actions);
     }
 
-    // The row under each reply, with a button to copy it (e.g. a message LoveLab wrote to send). The icon
+    // The row under each reply, with a button to copy it (e.g. to keep advice in a notes app). The icon
     // briefly turns into a checkmark (or a cross, if copying failed).
     createReplyActions(reply) {
         const row = createElement('div', 'message-actions');

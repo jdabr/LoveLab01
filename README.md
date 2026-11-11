@@ -18,8 +18,8 @@ partner, family, friends or coworkers and get warm, practical guidance, with no 
 - **Chats organized by person.** Keep separate conversations about each person in your life.
 - **Private by design.** No accounts or cookies. Chats are saved only on your device (for 30 days
   if you choose to remember them), and stored logs are anonymized.
-- **Help acting on the advice.** Suggested follow-up questions, a one-tap draft of a message to
-  send, and a copy button on every reply.
+- **Options, not scripts.** Advice lays out options instead of telling people what to do or writing
+  their messages for them, with suggested follow-up questions and a copy button on every reply.
 - **Focused and safe.** Off-topic requests are gently declined, and messages about danger or
   self-harm are prioritized, with a caring reply and crisis resources.
 - **Responsive.** Works on phones and large monitors, in light and dark mode.
