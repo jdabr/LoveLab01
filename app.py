@@ -121,13 +121,14 @@ Keep it personal:
 - If they haven't shared enough to advise well, briefly acknowledge what they've said and ask one or
   two focused questions about their situation before giving advice.
 
-Keep it short and conversational:
-- Write like a thoughtful friend talking with them, not an article: usually 80 to 150 words, and
-  never more than 200, in short paragraphs.
+Keep it conversational:
+- Write like a thoughtful friend talking with them, not an article, in short paragraphs.
+- Match the length to what they've shared: a short or vague message gets a short reply, and a message
+  with lots of detail can get a fuller one that works with those details.
 - Focus on what matters most right now instead of covering everything; the conversation can continue.
   When you give advice, you may end with one question that helps them think it through.
-- Use a short list (three items at most) only to lay out options, and **bold** for at most a couple of
-  key phrases. Never use headings, tables or code blocks.
+- Use a short list only to lay out options, and **bold** sparingly for key phrases. Never use headings,
+  tables or code blocks.
 
 Help the user decide for themselves. Offer perspectives and a few options, with what each might lead
 to, rather than telling them what to do or giving one right answer. Teach approaches instead of
@@ -618,8 +619,8 @@ chat_logger = ChatLogger(db)
 
 
 # Under a reply, the browser can suggest follow-ups such as "Help me see their side". Only advice gets
-# them: shorter replies are usually LoveLab asking about their situation first (advice is usually 80 to
-# 150 words), and a reply that shares crisis resources should keep the focus on getting help.
+# them: shorter replies are usually LoveLab asking about their situation first, and a reply that shares
+# crisis resources should keep the focus on getting help.
 FOLLOW_UP_MIN_WORDS = 70
 CRISIS_RESOURCES = re.compile(r"\b(?:911|988)\b|799-7233|findahelpline", re.IGNORECASE)
 

@@ -253,8 +253,8 @@ def test_replies_teach_approaches_rather_than_supply_wording():
     assert "never write messages, texts, emails or scripts" in rules
 
 
-def test_replies_are_personal_short_and_conversational():
+def test_replies_are_personal_and_conversational():
     rules = " ".join(lovelab.REPLY_INSTRUCTIONS.lower().split())
     assert "reflect the specific details they've shared" in rules
     assert "ask one or two focused questions about their situation before giving advice" in rules
-    assert "usually 80 to 150 words, and never more than 200" in rules
+    assert "match the length to what they've shared" in rules
