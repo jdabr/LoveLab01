@@ -27,9 +27,10 @@ import app as lovelab  # noqa: E402
 SAMPLE_REPLIES = [
     "It sounds like you've been carrying this for a while, and it makes sense that you feel unsure. "
     "When a friend keeps cancelling, it's easy to wonder whether it's about you, but often it's about "
-    "what's going on in their life.\n\nYou might try saying something like: \"I've missed seeing you. "
-    "Is everything okay?\" That opens the door without blame.\n\nHow do you think they'd respond if "
-    "you asked them directly?",
+    "what's going on in their life.\n\nOne option is to start by sharing that you've missed them and "
+    "asking how they're doing, before mentioning the cancellations. That opens the door without blame. "
+    "Another is to wait and see whether it keeps happening.\n\nHow do you think they'd respond if you "
+    "checked in with them first?",
     "That's a really thoughtful question. It might help to pick a calm moment, not right after an "
     "argument, and start with how you feel rather than what they did.",
 ]

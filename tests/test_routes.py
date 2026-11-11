@@ -237,6 +237,8 @@ def test_crisis_resources_cover_other_countries():
     assert "findahelpline.com" in lovelab.REPLY_INSTRUCTIONS
 
 
-def test_replies_advise_rather_than_write_messages_for_people():
-    # LoveLab lays out options and helps people find their own words; it doesn't ghostwrite
-    assert "Never write messages, texts," in lovelab.REPLY_INSTRUCTIONS
+def test_replies_teach_approaches_rather_than_supply_wording():
+    # LoveLab lays out options and teaches approaches; the words people use are their own
+    rules = " ".join(lovelab.REPLY_INSTRUCTIONS.lower().split())  # Ignore line wrapping
+    assert "never write out words, phrases or quotes" in rules
+    assert "never write messages, texts, emails or scripts" in rules
