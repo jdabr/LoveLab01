@@ -18,6 +18,8 @@ partner, family, friends or coworkers and get warm, practical guidance, with no 
 - **Chats organized by person.** Keep separate conversations about each person in your life.
 - **Private by design.** No accounts or cookies. Chats are saved only on your device (for 30 days
   if you choose to remember them), and stored logs are anonymized.
+- **Help acting on the advice.** Suggested follow-up questions, a one-tap draft of a message to
+  send, and a copy button on every reply.
 - **Focused and safe.** Off-topic requests are gently declined, and messages about danger or
   self-harm are prioritized, with a caring reply and crisis resources.
 - **Responsive.** Works on phones and large monitors, in light and dark mode.
@@ -52,7 +54,7 @@ flowchart LR
 | Encryption in transit | In production, plain-HTTP requests are redirected to HTTPS (`308` for `POST`, so messages aren't silently dropped), and an `HSTS` header tells browsers to use HTTPS for the site from then on. |
 | Cross-site attacks | A strict Content-Security-Policy (no inline scripts or styles), `X-Frame-Options: DENY`, and no cookies to steal or ride on. All user-supplied text, including people's names, is rendered with `textContent`, never as HTML. |
 | Cost and availability | Per-call timeouts keep both OpenAI calls within Heroku's 30-second limit, automatic retries are off, and each reply has a hard token cap. A moving-window rate limit caps usage per visitor and globally, and only messages that reach OpenAI count toward it, so junk requests can't use up the site-wide limit. Page loads never touch the database. |
-| Crisis situations | Both prompts treat safety as overriding the topic rule: the classifier is instructed to always let these messages through, and the reply model is instructed to share emergency, 988 and domestic-violence resources. |
+| Crisis situations | Both prompts treat safety as overriding the topic rule: the classifier is instructed to always let these messages through, and the reply model is instructed to share emergency, 988, domestic-violence and international helpline resources, which appear as tappable links. Replies that share them get no follow-up suggestions. |
 
 ## Tech stack
 

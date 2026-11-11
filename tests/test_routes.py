@@ -205,3 +205,33 @@ class TestStaticExtras:
         response = send("How do I talk to my partner about chores?", headers={"Accept-Encoding": "gzip"})
         assert response.status_code == 200
         assert "Content-Encoding" not in response.headers
+
+
+class TestFollowUps:
+    """The browser suggests follow-ups (like "Help me see their side") under advice, and nowhere else."""
+
+    ADVICE = "It sounds like you both want the same thing, even if it doesn't feel that way. " * 5
+
+    def test_advice_offers_follow_ups(self, send, fake_openai):
+        fake_openai.reply = self.ADVICE
+        assert send("My partner and I keep arguing about chores").json["followUps"] is True
+
+    def test_short_replies_do_not(self, send, fake_openai):
+        # Usually LoveLab asking what's going on, where follow-ups like "Help me see their side" don't fit
+        fake_openai.reply = "Hi! What's been on your mind lately?"
+        assert send("hi").json["followUps"] is False
+
+    def test_off_topic_replies_do_not(self, send, fake_openai):
+        fake_openai.verdict = "NO"
+        assert send("What's the weather?").json["followUps"] is False
+
+    @pytest.mark.parametrize("resource", ["call or text 988", "call 911", "call 1-800-799-7233",
+                                          "visit findahelpline.com"])
+    def test_replies_sharing_crisis_resources_do_not(self, send, fake_openai, resource):
+        # The focus should stay on getting help
+        fake_openai.reply = f"{self.ADVICE} Please {resource} right away."
+        assert send("I don't feel safe at home").json["followUps"] is False
+
+
+def test_crisis_resources_cover_other_countries():
+    assert "findahelpline.com" in lovelab.REPLY_INSTRUCTIONS

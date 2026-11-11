@@ -301,8 +301,9 @@ class TermsManager {
 // ── Server ──
 
 // Sends a message to the server. history is the chat's signed history token (or null for a new chat).
-// Resolves to { message, history }: the reply and the chat's updated history token. Rejects on errors;
-// when the server explains the problem (e.g. too many messages), error.userMessage holds its explanation.
+// Resolves to { message, history, followUps }: the reply, the chat's updated history token, and whether
+// to suggest follow-ups under the reply. Rejects on errors; when the server explains the problem (e.g.
+// too many messages), error.userMessage holds its explanation.
 function requestReply(message, history) {
     return fetch('/', {
         method: 'POST',
@@ -315,7 +316,11 @@ function requestReply(message, history) {
                 throw new Error(`Server error (${response.status})`);
             }
             if (!response.ok) throw Object.assign(new Error(data.message), { userMessage: data.message });
-            return { message: data.message, history: typeof data.history === 'string' ? data.history : null };
+            return {
+                message: data.message,
+                history: typeof data.history === 'string' ? data.history : null,
+                followUps: data.followUps === true,
+            };
         }));
 }
 
@@ -488,10 +493,11 @@ class ChatLibrary {
         return chat;
     }
 
-    addMessage(chatId, role, content) {
+    // extra: anything else to keep with the message, e.g. { followUps: true }
+    addMessage(chatId, role, content, extra = {}) {
         const chat = this.getChat(chatId);
         if (!chat) return;
-        chat.messages = [...chat.messages, { role, content }].slice(-ChatLibrary.MAX_MESSAGES);
+        chat.messages = [...chat.messages, { role, content, ...extra }].slice(-ChatLibrary.MAX_MESSAGES);
         if (!chat.title && role === 'user') chat.title = ChatLibrary.titleFrom(content);
         chat.updatedAt = Date.now();
         const person = this.getPerson(chat.personId);
@@ -538,16 +544,71 @@ class ChatLibrary {
 
 // ── Messages ──
 
+// Crisis resources in replies become links that can be tapped to call or open them. Only these exact
+// resources are linked, so a reply can never contain a link to anywhere else.
+const CRISIS_RESOURCES = /(?:https?:\/\/)?(?:www\.)?findahelpline\.com|1-800-799-7233|\b(?:988|911)\b/gi;
+
+function crisisLink(text) {
+    if (/findahelpline/i.test(text)) return 'https://findahelpline.com';
+    return { '1-800-799-7233': 'tel:+18007997233', '988': 'tel:988', '911': 'tel:911' }[text];
+}
+
+// Adds plain text to parent, turning crisis resources into links
+function appendText(parent, text) {
+    let last = 0;
+    for (const match of text.matchAll(CRISIS_RESOURCES)) {
+        if (match.index > last) parent.append(text.slice(last, match.index));
+        const link = createElement('a', '', match[0]);
+        link.href = crisisLink(match[0]);
+        if (link.protocol === 'https:') {
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+        }
+        parent.append(link);
+        last = match.index + match[0].length;
+    }
+    if (last < text.length) parent.append(text.slice(last));
+}
+
 // Adds text to parent, turning **bold** and *italic* into <strong> and <em>
 function appendInline(parent, text) {
     const pattern = /\*\*(.+?)\*\*|\*(\S(?:.*?\S)?)\*/g;
     let last = 0;
     for (const match of text.matchAll(pattern)) {
-        if (match.index > last) parent.append(text.slice(last, match.index));
-        parent.append(createElement(match[1] !== undefined ? 'strong' : 'em', '', match[1] ?? match[2]));
+        if (match.index > last) appendText(parent, text.slice(last, match.index));
+        const emphasis = parent.appendChild(createElement(match[1] !== undefined ? 'strong' : 'em'));
+        appendText(emphasis, match[1] ?? match[2]);
         last = match.index + match[0].length;
     }
-    if (last < text.length) parent.append(text.slice(last));
+    if (last < text.length) appendText(parent, text.slice(last));
+}
+
+// A reply as plain text, for copying: list markers stay, but the **bold**, *italic* and # heading marks go
+function toPlainText(text) {
+    return text.replace(/\r\n?/g, '\n').split('\n').map(line => line
+        .replace(/^\s*#{1,6}\s+/, '')
+        .replace(/\*\*(.+?)\*\*/g, '$1')
+        .replace(/\*(\S(?:.*?\S)?)\*/g, '$1')).join('\n').trim();
+}
+
+// Copies text to the clipboard. Resolves to true if it worked.
+async function copyText(text) {
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch (e) {
+        // Older browsers, or the clipboard being blocked: copy from a hidden text box instead
+        const focused = document.activeElement;
+        const box = createElement('textarea', 'visually-hidden');
+        box.value = text;
+        document.body.append(box);
+        box.select();
+        let copied = false;
+        try { copied = document.execCommand('copy'); } catch (err) { /* Not supported */ }
+        box.remove();
+        focused?.focus?.();
+        return copied;
+    }
 }
 
 // Renders the light Markdown the AI writes (paragraphs, "-" and "1." lists, **bold**, *italic*, and
@@ -617,10 +678,11 @@ class Message {
         return element;
     }
 
-    // Adds the message to the container and scrolls so it's visible
-    display(container) {
+    // Adds the message (and the row of actions under it, if any) and scrolls so it's visible
+    display(container, actions = null) {
         const element = this.createElement();
-        container.appendChild(element);
+        container.append(element);
+        if (actions) container.append(actions);
         scrollToMessage(container, element);
     }
 }
@@ -693,6 +755,9 @@ function firstCharacter(text) {
     }
     return [...trimmed][0] ?? '';
 }
+
+// Suggested next questions under a reply that gives advice (the server decides which replies get them)
+const FOLLOW_UPS = ['Write a message I could send', 'What if it doesn\'t go well?', 'Help me see their side'];
 
 // A round badge with the person's initial, coloured consistently from their id
 function createAvatar(person) {
@@ -776,14 +841,15 @@ class ChatApp {
 
     // ── Sending ──
 
-    send() {
+    // Sends text (e.g. a suggestion) or, without it, whatever is typed in the message box
+    send(text = null) {
         if (this.pendingChatId) return;  // One message at a time
-        const userMessage = this.input.value.trim();
+        const userMessage = (text ?? this.input.value).trim();
         if (!userMessage) return;
 
         // Instead of blocking with an alert, show the terms; agreeing sends the message
         if (!this.terms.isAgreed()) {
-            this.terms.showModal(() => this.send());
+            this.terms.showModal(() => this.send(text));
             return;
         }
 
@@ -793,17 +859,19 @@ class ChatApp {
             this.library.setActive(chat.id);
         }
         const chatId = this.current.chatId;
-        const chat = this.library.getChat(chatId);
-
         this.addMessage('user', userMessage);
         this.library.addMessage(chatId, 'user', userMessage);
-        this.input.value = '';
+        if (text === null) this.input.value = '';
+        this.fetchReply(chatId, userMessage);
+    }
+
+    // Asks the server to reply to the chat's latest message
+    fetchReply(chatId, userMessage) {
         this.setPending(chatId);
         this.renderSidebar();
-
-        requestReply(userMessage, chat.history)
-            .then(({ message, history }) => {
-                this.library.addMessage(chatId, 'assistant', message);
+        requestReply(userMessage, this.library.getChat(chatId).history)
+            .then(({ message, history, followUps }) => {
+                this.library.addMessage(chatId, 'assistant', message, followUps ? { followUps } : {});
                 this.library.setHistory(chatId, history);
                 if (this.current.chatId === chatId) {
                     this.hideThinking();
@@ -825,9 +893,52 @@ class ChatApp {
             })
             .finally(() => {
                 this.setPending(null);
+                if (this.current.chatId === chatId) this.renderTail();
                 this.renderSidebar();
                 this.focusInput();
             });
+    }
+
+    // Asks again for a reply to the chat's last message, after the first attempt failed
+    retry() {
+        const chat = this.library.getChat(this.current.chatId);
+        const last = chat?.messages.at(-1);
+        if (this.pendingChatId || last?.role !== 'user') return;
+        this.messageContainer.querySelectorAll('.error-message').forEach(element => element.remove());
+        this.clearTail();
+        this.fetchReply(chat.id, last.content);
+    }
+
+    // What comes after the chat's last message: suggested follow-ups under advice, or a way to try again
+    // when the last message got no reply (shown again after a refresh, since errors aren't saved)
+    renderTail() {
+        this.clearTail();
+        const chat = this.library.getChat(this.current.chatId);
+        const last = chat?.messages.at(-1);
+        if (!last || chat.id === this.pendingChatId) return;
+
+        let tail;
+        if (last.role === 'user') {
+            tail = createElement('div', 'chat-tail');
+            tail.append(createElement('span', 'retry-note', 'LoveLab couldn\'t reply to this.'),
+                createButton('text-button', 'Try again', () => this.retry()));
+        } else if (last.followUps) {
+            tail = createElement('div', 'chat-tail');
+            tail.setAttribute('role', 'group');
+            tail.setAttribute('aria-label', 'Suggested follow-ups');
+            FOLLOW_UPS.forEach(text => tail.append(createButton('follow-up', text, () => this.send(text))));
+        } else {
+            return;
+        }
+        // Keep it in view, unless the visitor has scrolled up to read
+        const container = this.messageContainer;
+        const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 48;
+        container.append(tail);
+        if (atBottom) container.scrollTop = container.scrollHeight;
+    }
+
+    clearTail() {
+        this.messageContainer.querySelector('.chat-tail')?.remove();
     }
 
     // Screen readers read out each reply as it arrives. (The message list itself isn't a live region, or
@@ -862,7 +973,23 @@ class ChatApp {
 
     addMessage(role, content, isError = false) {
         this.showEmptyState(false);
-        new Message(role, content, isError).display(this.messageContainer);
+        this.clearTail();  // A new message replaces any follow-ups or "Try again" under the last one
+        const actions = role === 'assistant' && !isError ? this.createReplyActions(content) : null;
+        new Message(role, content, isError).display(this.messageContainer, actions);
+    }
+
+    // The row under each reply, with a button to copy it (e.g. a message LoveLab wrote to send)
+    createReplyActions(reply) {
+        const row = createElement('div', 'message-actions');
+        const copy = createButton('message-action', 'Copy', async () => {
+            const copied = await copyText(toPlainText(reply));
+            copy.textContent = copied ? 'Copied' : 'Couldn\'t copy';
+            clearTimeout(copy.resetTimer);
+            copy.resetTimer = setTimeout(() => { copy.textContent = 'Copy'; }, 2000);
+        });
+        copy.setAttribute('aria-label', 'Copy this reply');
+        row.append(copy);
+        return row;
     }
 
     // An empty chat shows a greeting and example questions suited to who the chat is about
@@ -882,9 +1009,7 @@ class ChatApp {
     // Sends an example question as if the visitor typed it (agreeing to the terms first if needed)
     useSuggestion(event) {
         const button = event.target.closest('.suggestion');
-        if (!button) return;
-        this.input.value = button.textContent;
-        this.send();
+        if (button) this.send(button.textContent);
     }
 
     showThinking() {
@@ -913,10 +1038,11 @@ class ChatApp {
 
     // Shows a chat's saved messages, or the greeting if it has none
     renderMessages(chat) {
-        this.messageContainer.querySelectorAll('.message').forEach(element => element.remove());
+        [...this.messageContainer.children].forEach(element => element !== this.emptyState && element.remove());
         this.showEmptyState(!chat?.messages.length);
         chat?.messages.forEach(({ role, content }) => this.addMessage(role, content));
         if (chat && chat.id === this.pendingChatId) this.showThinking();
+        this.renderTail();
     }
 
     // Another tab changed the saved chats: catch up without disturbing anything being typed here
