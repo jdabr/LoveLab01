@@ -50,8 +50,10 @@ LoveLab is designed to be anonymous. There are no accounts, and we never ask for
 
 What we store. Each time LoveLab replies to a message, we store:
 - your message (up to the first 255 characters) and LoveLab's response (up to the first 3,000 characters);
-- the date and time; and
-- an anonymous visitor ID.
+- the date and time;
+- an anonymous visitor ID; and
+- technical details about the reply: whether it answered or declined your message, how long it took, how much processing it used, and whether it included crisis resources.
+If a reply fails, or you leave before it finishes, we store only the date and time, the anonymous visitor ID and these technical details, not your message. We also keep daily totals of these details (for example, how many messages were answered each day), which contain no messages or visitor IDs.
 Before anything is stored, email addresses, phone numbers and other long numbers, links and social media handles are automatically replaced with placeholders such as [email] or [number].
 
 What we do not store. We do not store your IP address with your messages or anywhere in our database. It is used to create the anonymous visitor ID and to enforce message limits. For message limits, it is held in a temporary store for up to 24 hours after your last message and then deleted automatically. The visitor ID is generated using a secret that changes every day. It lets us see which messages were sent by the same visitor on the same day. Shortly after each day ends (midnight UTC), that day's secret is permanently deleted, and the ID can no longer be linked to your IP address, to you, or to your visits on other days.

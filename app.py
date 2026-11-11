@@ -1,6 +1,7 @@
 """LoveLab: a Flask app that serves an AI relationship-advice chat."""
 
 import contextlib
+import dataclasses
 import datetime
 import hashlib
 import hmac
@@ -11,6 +12,7 @@ import os
 import random
 import re
 import secrets
+import time
 
 import click
 from dotenv import load_dotenv
@@ -23,7 +25,7 @@ from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from openai import OpenAI
-from sqlalchemy import text
+from sqlalchemy import case, func, text
 from sqlalchemy.exc import IntegrityError
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -266,11 +268,41 @@ migrate = Migrate(app, db)
 # ── Models ──
 
 class ChatLog(db.Model):
+    """One row per message that reached OpenAI. The text is only kept when LoveLab replied; a message that
+    failed, or that the visitor left before the reply finished, is recorded without it.
+
+    The columns after visitor_id were added on 2026-11-11, so they're empty on older rows.
+    """
     id = db.Column(db.Integer, primary_key=True)
-    timestamp = db.Column(db.DateTime, nullable=False)
-    user_message = db.Column(db.String(LOGGED_USER_CHARS), nullable=False)
-    assistant_message = db.Column(db.String(LOGGED_REPLY_CHARS), nullable=False)
+    timestamp = db.Column(db.DateTime, nullable=False, index=True)  # UTC
+    user_message = db.Column(db.String(LOGGED_USER_CHARS))
+    assistant_message = db.Column(db.String(LOGGED_REPLY_CHARS))
     visitor_id = db.Column(db.String(16))  # Anonymous per-day ID, never the IP address (see ChatLogger)
+    outcome = db.Column(db.String(16))  # answered, off_topic, failed or abandoned (the visitor left)
+    model = db.Column(db.String(64))
+    input_tokens = db.Column(db.Integer)  # Including the topic check
+    output_tokens = db.Column(db.Integer)
+    first_text_ms = db.Column(db.Integer)  # Until the reply's first words appeared
+    reply_ms = db.Column(db.Integer)  # Until the reply finished (or failed, or the visitor left)
+    crisis_resources = db.Column(db.Boolean)  # Whether the reply shared crisis resources
+
+
+class DailySummary(db.Model):
+    """Totals for each finished day (UTC), with no messages or visitor IDs, so they can be kept even if the
+    detailed logs are later deleted. Days before 2026-11-11 aren't summarized (their logs lack outcomes)."""
+    __tablename__ = "daily_summary"
+    day = db.Column(db.Date, primary_key=True)
+    messages = db.Column(db.Integer, nullable=False)
+    visitors = db.Column(db.Integer, nullable=False)  # Distinct anonymous visitor IDs
+    answered = db.Column(db.Integer, nullable=False)
+    off_topic = db.Column(db.Integer, nullable=False)
+    failed = db.Column(db.Integer, nullable=False)
+    abandoned = db.Column(db.Integer, nullable=False)
+    crisis_replies = db.Column(db.Integer, nullable=False)
+    input_tokens = db.Column(db.BigInteger, nullable=False)
+    output_tokens = db.Column(db.BigInteger, nullable=False)
+    avg_first_text_ms = db.Column(db.Integer)  # Over answered messages
+    avg_reply_ms = db.Column(db.Integer)
 
 
 class VisitorSalt(db.Model):
@@ -286,6 +318,37 @@ class EmptyReplyError(RuntimeError):
     """The model sent back no text, e.g. because it refused or used up its tokens while reasoning."""
 
 
+@dataclasses.dataclass
+class ExchangeStats:
+    """What's recorded about a message besides its text: how it went, what it used and how long it took."""
+    started: float = dataclasses.field(default_factory=time.monotonic)
+    outcome: str | None = None
+    model: str | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    first_text_ms: int | None = None
+    reply_ms: int | None = None
+    crisis_resources: bool = False
+
+    def add_usage(self, usage):
+        """Add the tokens from an OpenAI response's usage (if it reported any)."""
+        self.input_tokens += getattr(usage, "input_tokens", 0) or 0
+        self.output_tokens += getattr(usage, "output_tokens", 0) or 0
+
+    def elapsed_ms(self):
+        return round((time.monotonic() - self.started) * 1000)
+
+    def end(self, outcome):
+        self.outcome = outcome
+        self.reply_ms = self.elapsed_ms()
+
+    def columns(self):
+        """The ChatLog columns these stats fill in."""
+        stats = dataclasses.asdict(self)
+        del stats["started"]
+        return stats
+
+
 class ChatAssistant:
     """Talks to OpenAI: checks a message is on topic and generates replies."""
 
@@ -299,11 +362,12 @@ class ChatAssistant:
         # later, and its own logs are scrubbed, so nothing is stored there.
         return self.client.with_options(timeout=timeout).responses.create(store=False, **request)
 
-    def is_on_topic(self, user_message, previous_reply=None):
+    def is_on_topic(self, user_message, previous_reply=None, on_usage=None):
         """Ask the classifier whether the message belongs in the chat.
 
         previous_reply is LoveLab's last message, so short answers to its follow-up questions
-        ("not really", "yes") are judged in context instead of being turned away.
+        ("not really", "yes") are judged in context instead of being turned away. on_usage, if given, is
+        called with the tokens the check used.
         """
         # The classifier's rules go in `instructions`, and the user's text goes in as a separate
         # message, so the user's text can't rewrite the question being asked
@@ -316,16 +380,19 @@ class ChatAssistant:
             instructions=FILTER_INSTRUCTIONS,
             input=messages,
         )
+        if on_usage:
+            on_usage(getattr(result, "usage", None))
         verdict = result.output_text.strip().strip(".!\"' ").upper()
 
         # Fail closed: only an explicit YES lets the message through. Anything else
         # (NO, another language, an explanation, an injected reply) is treated as off-topic.
         return verdict == "YES"
 
-    def reply_stream(self, conversation):
+    def reply_stream(self, conversation, on_usage=None):
         """Yield the assistant's reply to a list of {"role", "content"} messages, piece by piece as it's written.
 
         Raises EmptyReplyError rather than producing a blank reply, so the visitor is asked to try again.
+        on_usage, if given, is called with the tokens the reply used once it's finished.
         """
         status = details = None
         wrote = False
@@ -344,6 +411,8 @@ class ChatAssistant:
                     yield event.delta
                 elif event.type in ("response.completed", "response.incomplete"):
                     status, details = event.response.status, event.response.incomplete_details
+                    if on_usage:
+                        on_usage(getattr(event.response, "usage", None))
                 elif event.type == "response.failed":
                     raise RuntimeError(f"Reply failed: {getattr(event.response, 'error', None)}")
                 elif event.type == "error":
@@ -363,11 +432,12 @@ class ChatAssistant:
 # - Emails, phone numbers, links and @handles are replaced with placeholders before saving.
 
 class ChatLogger:
-    """Saves anonymized chat messages to the database."""
+    """Saves anonymized chat messages to the database, and keeps a summary of each finished day."""
 
     def __init__(self, db):
         self.db = db
         self._cached_salt = (None, None)  # (day, secret) so the DB is only asked once per day per process
+        self._summarized_day = None
 
     @staticmethod
     def _today():
@@ -376,6 +446,8 @@ class ChatLogger:
     @staticmethod
     def storable(text, max_length):
         """Text as it may be stored: contact details scrubbed, then truncated to the column size."""
+        if text is None:
+            return None
         # Postgres can't store NUL characters
         return scrub_contact_details(text.replace("\x00", ""))[:max_length]
 
@@ -418,16 +490,69 @@ class ChatLogger:
         digest = hmac.new(self._daily_secret().encode(), (ip_address or "").encode(), hashlib.sha256)
         return digest.hexdigest()[:16]
 
-    def log_message(self, user_message, assistant_message, ip_address):
+    def log_message(self, user_message, assistant_message, ip_address, stats=None):
+        """Save a message and LoveLab's reply (both None if the reply failed or the visitor left), with the
+        ExchangeStats about it."""
         chat_log = ChatLog(
             # Stored in UTC (without timezone info), matching the UTC day used for visitor IDs
             timestamp=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
             user_message=self.storable(user_message, LOGGED_USER_CHARS),
             assistant_message=self.storable(assistant_message, LOGGED_REPLY_CHARS),
             visitor_id=self.visitor_id(ip_address),
+            **(stats.columns() if stats else {}),
         )
         self.db.session.add(chat_log)
         self.db.session.commit()
+        # The day's first message (in each process) also summarizes the days that have finished since
+        if self._summarized_day != self._today():
+            self._summarized_day = self._today()  # Only try once a day, even if it fails
+            self.summarize_days()
+
+    def summarize_days(self):
+        """Add (or refresh) the DailySummary of each finished day since the latest summary. Safe to run again.
+        Returns how many days were summarized."""
+        latest = self.db.session.query(func.max(DailySummary.day)).scalar()
+        day = func.date(ChatLog.timestamp)
+        answered = ChatLog.outcome == "answered"
+
+        def count(condition):
+            return func.coalesce(func.sum(case((condition, 1), else_=0)), 0)
+
+        query = self.db.session.query(
+            day,
+            func.count(ChatLog.id),
+            func.count(func.distinct(ChatLog.visitor_id)),
+            count(answered),
+            count(ChatLog.outcome == "off_topic"),
+            count(ChatLog.outcome == "failed"),
+            count(ChatLog.outcome == "abandoned"),
+            count(ChatLog.crisis_resources.is_(True)),
+            func.coalesce(func.sum(ChatLog.input_tokens), 0),
+            func.coalesce(func.sum(ChatLog.output_tokens), 0),
+            func.avg(case((answered, ChatLog.first_text_ms))),
+            func.avg(case((answered, ChatLog.reply_ms))),
+        ).filter(
+            ChatLog.outcome.isnot(None),  # Only rows since tracking began
+            ChatLog.timestamp < datetime.datetime.combine(self._today(), datetime.time.min),  # Finished days
+        )
+        if latest:
+            query = query.filter(ChatLog.timestamp >= datetime.datetime.combine(latest, datetime.time.min))
+
+        rows = query.group_by(day).all()
+        for row in rows:
+            summary_day = row[0] if isinstance(row[0], datetime.date) else datetime.date.fromisoformat(row[0])
+            self.db.session.merge(DailySummary(
+                day=summary_day, messages=row[1], visitors=row[2], answered=row[3], off_topic=row[4],
+                failed=row[5], abandoned=row[6], crisis_replies=row[7], input_tokens=row[8], output_tokens=row[9],
+                avg_first_text_ms=None if row[10] is None else round(row[10]),
+                avg_reply_ms=None if row[11] is None else round(row[11]),
+            ))
+        try:
+            self.db.session.commit()
+        except IntegrityError:
+            # Another worker summarized the same day at the same moment (with the same numbers)
+            self.db.session.rollback()
+        return len(rows)
 
 
 # ── Conversation history (signed history tokens) ──
@@ -491,9 +616,9 @@ def offers_follow_ups(reply):
     return len(reply) >= FOLLOW_UP_MIN_LENGTH and not CRISIS_RESOURCES.search(reply)
 
 
-def reply_events(user_message, history_token):
+def reply_events(user_message, history_token, stats):
     """Work out the reply: yield ("text", piece) as it's written, then ("done", (reply, new history token,
-    whether to suggest follow-ups)).
+    whether to suggest follow-ups)). Fills in stats (an ExchangeStats) along the way.
 
     An off-topic reply comes as a single "done", and off-topic exchanges aren't added to the chat's history.
     """
@@ -501,18 +626,26 @@ def reply_events(user_message, history_token):
     previous_reply = next((m["content"] for m in reversed(history) if m["role"] == "assistant"), None)
 
     # Filter before calling the main model, saving unnecessary API calls
-    if not chat_assistant.is_on_topic(user_message, previous_reply):
+    stats.model = OPENAI_FILTER_MODEL
+    if not chat_assistant.is_on_topic(user_message, previous_reply, on_usage=stats.add_usage):
+        stats.first_text_ms = stats.elapsed_ms()
+        stats.end("off_topic")
         yield "done", (random.choice(OFF_TOPIC_REPLIES), make_history_token(history), False)
         return
 
+    stats.model = OPENAI_MODEL
     conversation = history + [{"role": "user", "content": user_message}]
     reply = ""
-    with contextlib.closing(chat_assistant.reply_stream(conversation)) as pieces:
+    with contextlib.closing(chat_assistant.reply_stream(conversation, on_usage=stats.add_usage)) as pieces:
         for piece in pieces:
             if reply or piece.strip():  # Hold back leading blanks, so a blank reply never starts a stream
+                if not reply:
+                    stats.first_text_ms = stats.elapsed_ms()
                 reply += piece
                 yield "text", piece
     reply = reply.strip()
+    stats.crisis_resources = bool(CRISIS_RESOURCES.search(reply))
+    stats.end("answered")
     new_history = conversation + [{"role": "assistant", "content": reply}]
     yield "done", (reply, make_history_token(new_history), offers_follow_ups(reply))
 
@@ -520,11 +653,11 @@ def reply_events(user_message, history_token):
 STREAM_MIMETYPE = "application/x-ndjson"
 
 
-def stream_reply(user_message, first, events):
+def stream_reply(user_message, first, events, stats):
     """Send the reply as it's written, as newline-delimited JSON: {"text": piece} lines, then the finished
     {"message", "history", "followUps"} (the same as an unstreamed reply), or {"error": ...} if it fails
-    partway. first is reply_events' first event (already received); events is the rest. Only finished
-    replies are logged.
+    partway. first is reply_events' first event (already received); events is the rest. A reply that fails,
+    or that the visitor leaves, is logged without its text.
 
     No compression for these (see COMPRESS_MIMETYPES): they mix the visitor's text with their history.
     """
@@ -535,10 +668,17 @@ def stream_reply(user_message, first, events):
                     yield json.dumps({"text": result}) + "\n"
                     continue
                 reply, history_token, follow_ups = result
-                log_exchange(user_message, reply)
+                log_exchange(user_message, reply, stats)
                 yield json.dumps({"message": reply, "history": history_token, "followUps": follow_ups}) + "\n"
+        except GeneratorExit:  # The visitor left (closed the page) before the reply finished
+            if stats.outcome is None:
+                stats.end("abandoned")
+                log_exchange(None, None, stats)
+            raise
         except Exception:
             app.logger.exception("OpenAI request failed partway through a reply")
+            stats.end("failed")
+            log_exchange(None, None, stats)
             yield json.dumps({"error": SERVICE_ERROR_REPLY}) + "\n"
         finally:
             events.close()  # If the visitor left partway, this stops the model writing
@@ -547,11 +687,12 @@ def stream_reply(user_message, first, events):
     return Response(stream_with_context(lines()), mimetype=STREAM_MIMETYPE, headers={"Cache-Control": "no-store"})
 
 
-def log_exchange(user_message, assistant_message):
-    """Log the exchange; a logging failure shouldn't stop the user from getting their reply."""
+def log_exchange(user_message, assistant_message, stats):
+    """Log the exchange (pass None for the texts if the reply failed or the visitor left). A logging failure
+    shouldn't stop the visitor getting their reply."""
     try:
         # The IP (real client IP via ProxyFix) is only used to derive the anonymous visitor ID; it isn't stored
-        chat_logger.log_message(user_message, assistant_message, request.remote_addr)
+        chat_logger.log_message(user_message, assistant_message, request.remote_addr, stats)
     except Exception:
         db.session.rollback()
         app.logger.exception("Failed to log chat message")
@@ -580,6 +721,13 @@ def purge_visitor_salts():
     """Delete visitor-ID secrets from earlier days. Schedule daily (e.g. Heroku Scheduler, 00:30 UTC)."""
     deleted = chat_logger.delete_expired_salts()
     print(f"Deleted {deleted} expired visitor secret(s).")
+
+
+@app.cli.command("summarize-days")
+def summarize_days():
+    """Add (or refresh) the daily summaries of finished days. This also happens automatically on each day's
+    first message."""
+    print(f"Summarized {chat_logger.summarize_days()} day(s).")
 
 
 @app.cli.command("scrub-old-logs")
@@ -684,12 +832,13 @@ def home():
     if rejection:
         return jsonify({"message": rejection}), 400
 
-    events = reply_events(user_message, history)
+    stats = ExchangeStats()
+    events = reply_events(user_message, history, stats)
     try:
         # Wait for the topic check and the start of the reply, so a failure before then is a normal error
         first = next(events)
         if STREAM_MIMETYPE in request.headers.get("Accept", ""):
-            return stream_reply(user_message, first, events)
+            return stream_reply(user_message, first, events, stats)
         # Not asked to stream (e.g. a page loaded before streaming existed): send the finished reply
         kind, result = first
         while kind != "done":
@@ -697,10 +846,12 @@ def home():
     except Exception:
         # Log the full error (visible in Heroku logs) and give the user a friendly reply instead of a 500
         app.logger.exception("OpenAI request failed")
+        stats.end("failed")
+        log_exchange(None, None, stats)
         return jsonify({"message": SERVICE_ERROR_REPLY}), 502
 
     reply, history_token, follow_ups = result
-    log_exchange(user_message, reply)
+    log_exchange(user_message, reply, stats)
     return jsonify({"message": reply, "history": history_token, "followUps": follow_ups})
 
 

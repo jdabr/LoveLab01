@@ -39,7 +39,7 @@ flowchart LR
     F -->|YES| M[Reply model<br/>OpenAI<br/>recent history from the chat's signed token]
     M --> S[Scrub contact details]
     OT --> S
-    S --> DB[(Postgres<br/>anonymized log)]
+    S --> DB[(Postgres<br/>anonymized log<br/>+ daily totals)]
     M -->|streamed as it's written| B
     OT --> B
 ```
@@ -50,7 +50,7 @@ flowchart LR
 |---|---|
 | Prompt injection | Rules live in `instructions`, and user text is always passed as a separate message. The classifier treats the message as untrusted data and rejects attempts to change its task. The reply prompt tells the model to ignore role or persona changes. |
 | Forged history | Each chat's recent history travels as a signed token (itsdangerous) that expires after 31 days. Tampered, expired or foreign-key tokens are ignored, and even a valid token only contributes `user` and `assistant` text. |
-| Anonymous analytics | IPs are HMAC-hashed with a random secret that **rotates daily** and is deleted shortly after each day ends. Messages from one visitor can be grouped within a day, but once the secret is gone they can't be linked to an IP address or across days. |
+| Anonymous analytics | IPs are HMAC-hashed with a random secret that **rotates daily** and is deleted shortly after each day ends. Messages from one visitor can be grouped within a day, but once the secret is gone they can't be linked to an IP address or across days. Each message also records its outcome, tokens, timing and whether crisis resources were shared (with no text if the reply failed), and finished days roll up into daily totals with no messages or visitor IDs. |
 | Data kept by third parties | OpenAI calls use `store=False`, so conversations aren't kept for later retrieval in the OpenAI dashboard (OpenAI may still keep them for up to 30 days to monitor for abuse). |
 | Shared devices | Chats are saved in `sessionStorage` (cleared when the tab closes) unless the visitor opts in to remembering, and remembered chats expire 30 days after their last message. The site sets no cookies, so deleting a chat leaves nothing behind on the device or LoveLab's servers except the anonymized log. |
 | Encryption in transit | In production, plain-HTTP requests are redirected to HTTPS (`308` for `POST`, so messages aren't silently dropped), and an `HSTS` header tells browsers to use HTTPS for the site from then on. |

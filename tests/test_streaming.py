@@ -62,14 +62,15 @@ def test_blank_reply_is_a_normal_error(client, fake_openai, blank):
     assert response.status_code == 502
 
 
-def test_failure_partway_ends_with_an_error_and_is_not_logged(client, fake_openai):
+def test_failure_partway_ends_with_an_error_and_keeps_no_text(client, fake_openai):
     fake_openai.reply = ADVICE
     fake_openai.fail_midway = TimeoutError("connection dropped")
     response, lines = stream(client, "My partner and I keep arguing")
     assert response.status_code == 200  # The reply had already started
     assert lines[0] == {"text": "It "}
     assert lines[-1] == {"error": lovelab.SERVICE_ERROR_REPLY}
-    assert ChatLog.query.count() == 0
+    [row] = ChatLog.query.all()
+    assert (row.outcome, row.user_message, row.assistant_message) == ("failed", None, None)
 
 
 def test_leaving_partway_stops_the_model(client, fake_openai):
@@ -78,7 +79,8 @@ def test_leaving_partway_stops_the_model(client, fake_openai):
     next(iter(response.response))  # The first piece arrives...
     response.close()  # ...then the visitor closes the page
     assert fake_openai.streams[-1].closed
-    assert ChatLog.query.count() == 0
+    [row] = ChatLog.query.all()  # Recorded without its text
+    assert (row.outcome, row.user_message, row.assistant_message) == ("abandoned", None, None)
 
 
 def test_streamed_replies_are_not_compressed(client, fake_openai):

@@ -19,6 +19,11 @@ import pytest  # noqa: E402
 import app as lovelab  # noqa: E402
 
 
+# Tokens the fake reports for the topic check and for each reply, like the real API's usage
+FILTER_USAGE = types.SimpleNamespace(input_tokens=40, output_tokens=2)
+REPLY_USAGE = types.SimpleNamespace(input_tokens=300, output_tokens=120)
+
+
 class FakeStream:
     """Stands in for the SDK's stream of reply events: the reply arrives a word at a time. With
     fail_midway set, that error is raised after the first word."""
@@ -39,7 +44,7 @@ class FakeStream:
             if self.fail_midway and index == 1:
                 raise self.fail_midway
             yield types.SimpleNamespace(type="response.output_text.delta", delta=piece)
-        done = types.SimpleNamespace(status="completed", incomplete_details=None)
+        done = types.SimpleNamespace(status="completed", incomplete_details=None, usage=REPLY_USAGE)
         yield types.SimpleNamespace(type="response.completed", response=done)
 
 
@@ -68,7 +73,7 @@ class FakeOpenAI:
             raise self.error
         if instructions == lovelab.FILTER_INSTRUCTIONS:
             self.filter_calls.append(input)
-            return types.SimpleNamespace(output_text=self.verdict)
+            return types.SimpleNamespace(output_text=self.verdict, usage=FILTER_USAGE)
         assert stream, "Replies are always streamed"
         self.reply_calls.append(input)
         self.reply_token_caps.append(max_output_tokens)
@@ -89,6 +94,7 @@ def app(fake_openai):
     lovelab.app.config["TESTING"] = True
     lovelab.limiter.enabled = False
     lovelab.chat_logger._cached_salt = (None, None)
+    lovelab.chat_logger._summarized_day = None
     with lovelab.app.app_context():
         lovelab.db.create_all()
         yield lovelab.app

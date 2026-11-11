@@ -54,7 +54,8 @@ class FakeStream:
         for piece in re.findall(r"\S+\s*|\s+", self.text):
             time.sleep(0.04)
             yield types.SimpleNamespace(type="response.output_text.delta", delta=piece)
-        done = types.SimpleNamespace(status="completed", incomplete_details=None)
+        usage = types.SimpleNamespace(input_tokens=350, output_tokens=len(self.text) // 4)
+        done = types.SimpleNamespace(status="completed", incomplete_details=None, usage=usage)
         yield types.SimpleNamespace(type="response.completed", response=done)
 
 
@@ -71,7 +72,7 @@ class FakeOpenAI:
     def create(self, model, instructions, input, **_options):
         if instructions == lovelab.FILTER_INSTRUCTIONS:
             time.sleep(0.6)  # Like the real topic check, so the typing dots show briefly
-            return types.SimpleNamespace(output_text="YES")
+            return types.SimpleNamespace(output_text="YES", usage=types.SimpleNamespace(input_tokens=60, output_tokens=1))
         user_messages = sum(1 for message in input if message["role"] == "user")
         return FakeStream(SAMPLE_REPLIES[(user_messages - 1) % len(SAMPLE_REPLIES)])
 
@@ -80,6 +81,7 @@ lovelab.chat_assistant.client = FakeOpenAI()
 lovelab.limiter.enabled = False
 
 with lovelab.app.app_context():
+    lovelab.db.drop_all()  # A fresh, throwaway database each time, always matching the current models
     lovelab.db.create_all()
 
 if __name__ == "__main__":
