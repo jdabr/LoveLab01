@@ -1,8 +1,11 @@
 """LoveLab: a Flask app that serves an AI relationship-advice chat."""
 
+import contextlib
 import datetime
 import hashlib
 import hmac
+import itertools
+import json
 import logging
 import os
 import random
@@ -11,7 +14,8 @@ import secrets
 
 import click
 from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, render_template, request, send_from_directory
+from flask import (Flask, Response, jsonify, redirect, render_template, request, send_from_directory,
+                   stream_with_context)
 from flask_compress import Compress
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -40,8 +44,9 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-terra")
 # The topic filter only needs a one-word answer, so a smaller, faster model can be used for it.
 OPENAI_FILTER_MODEL = os.environ.get("OPENAI_FILTER_MODEL", OPENAI_MODEL)
 
-# Per-call timeouts (seconds). Heroku cuts off any request after 30s, so both calls together must
-# finish well before that; a slow call fails fast with a friendly "try again" message instead.
+# Per-call timeouts (seconds). Heroku drops a request whose response hasn't started within 30s, so the
+# topic check and the start of the reply must come well before that; a slow call fails fast with a
+# friendly "try again" message instead. Once a reply is streaming, REPLY_TIMEOUT also limits any pause.
 FILTER_TIMEOUT = float(os.environ.get("OPENAI_FILTER_TIMEOUT", "8"))
 REPLY_TIMEOUT = float(os.environ.get("OPENAI_REPLY_TIMEOUT", "18"))
 # Hard cap on each reply's length, in tokens (including any reasoning the model does). A normal reply
@@ -317,23 +322,34 @@ class ChatAssistant:
         # (NO, another language, an explanation, an injected reply) is treated as off-topic.
         return verdict == "YES"
 
-    def reply(self, conversation):
-        """Return the assistant's reply to a list of {"role", "content"} messages.
+    def reply_stream(self, conversation):
+        """Yield the assistant's reply to a list of {"role", "content"} messages, piece by piece as it's written.
 
-        Raises EmptyReplyError rather than returning a blank reply, so the visitor is asked to try again.
+        Raises EmptyReplyError rather than producing a blank reply, so the visitor is asked to try again.
         """
-        response = self._create(
+        status = details = None
+        wrote = False
+        stream = self._create(
             REPLY_TIMEOUT,
             model=OPENAI_MODEL,
             instructions=REPLY_INSTRUCTIONS,
             input=conversation,
             max_output_tokens=REPLY_MAX_TOKENS,
+            stream=True,
         )
-        text = response.output_text.strip()
-        if not text:
-            raise EmptyReplyError(f"No reply text (status: {getattr(response, 'status', None)}, "
-                                  f"details: {getattr(response, 'incomplete_details', None)})")
-        return text
+        with stream:  # Leaving early (e.g. the visitor closed the page) closes it, so the model stops writing
+            for event in stream:
+                if event.type == "response.output_text.delta":
+                    wrote = wrote or bool(event.delta.strip())
+                    yield event.delta
+                elif event.type in ("response.completed", "response.incomplete"):
+                    status, details = event.response.status, event.response.incomplete_details
+                elif event.type == "response.failed":
+                    raise RuntimeError(f"Reply failed: {getattr(event.response, 'error', None)}")
+                elif event.type == "error":
+                    raise RuntimeError(f"Reply failed: {event.message}")
+        if not wrote:
+            raise EmptyReplyError(f"No reply text (status: {status}, details: {details})")
 
 
 # Logs are kept anonymous:
@@ -475,22 +491,60 @@ def offers_follow_ups(reply):
     return len(reply) >= FOLLOW_UP_MIN_LENGTH and not CRISIS_RESOURCES.search(reply)
 
 
-def respond_to(user_message, history_token):
-    """Return (reply, new history token, whether to suggest follow-ups).
+def reply_events(user_message, history_token):
+    """Work out the reply: yield ("text", piece) as it's written, then ("done", (reply, new history token,
+    whether to suggest follow-ups)).
 
-    Off-topic exchanges aren't added to the chat's history.
+    An off-topic reply comes as a single "done", and off-topic exchanges aren't added to the chat's history.
     """
     history = load_history(history_token)
     previous_reply = next((m["content"] for m in reversed(history) if m["role"] == "assistant"), None)
 
     # Filter before calling the main model, saving unnecessary API calls
     if not chat_assistant.is_on_topic(user_message, previous_reply):
-        return random.choice(OFF_TOPIC_REPLIES), make_history_token(history), False
+        yield "done", (random.choice(OFF_TOPIC_REPLIES), make_history_token(history), False)
+        return
 
     conversation = history + [{"role": "user", "content": user_message}]
-    assistant_message = chat_assistant.reply(conversation)
-    new_history = conversation + [{"role": "assistant", "content": assistant_message}]
-    return assistant_message, make_history_token(new_history), offers_follow_ups(assistant_message)
+    reply = ""
+    with contextlib.closing(chat_assistant.reply_stream(conversation)) as pieces:
+        for piece in pieces:
+            if reply or piece.strip():  # Hold back leading blanks, so a blank reply never starts a stream
+                reply += piece
+                yield "text", piece
+    reply = reply.strip()
+    new_history = conversation + [{"role": "assistant", "content": reply}]
+    yield "done", (reply, make_history_token(new_history), offers_follow_ups(reply))
+
+
+STREAM_MIMETYPE = "application/x-ndjson"
+
+
+def stream_reply(user_message, first, events):
+    """Send the reply as it's written, as newline-delimited JSON: {"text": piece} lines, then the finished
+    {"message", "history", "followUps"} (the same as an unstreamed reply), or {"error": ...} if it fails
+    partway. first is reply_events' first event (already received); events is the rest. Only finished
+    replies are logged.
+
+    No compression for these (see COMPRESS_MIMETYPES): they mix the visitor's text with their history.
+    """
+    def lines():
+        try:
+            for kind, result in itertools.chain([first], events):
+                if kind == "text":
+                    yield json.dumps({"text": result}) + "\n"
+                    continue
+                reply, history_token, follow_ups = result
+                log_exchange(user_message, reply)
+                yield json.dumps({"message": reply, "history": history_token, "followUps": follow_ups}) + "\n"
+        except Exception:
+            app.logger.exception("OpenAI request failed partway through a reply")
+            yield json.dumps({"error": SERVICE_ERROR_REPLY}) + "\n"
+        finally:
+            events.close()  # If the visitor left partway, this stops the model writing
+
+    # stream_with_context keeps the request available (for logging) while the reply streams
+    return Response(stream_with_context(lines()), mimetype=STREAM_MIMETYPE, headers={"Cache-Control": "no-store"})
 
 
 def log_exchange(user_message, assistant_message):
@@ -630,15 +684,24 @@ def home():
     if rejection:
         return jsonify({"message": rejection}), 400
 
+    events = reply_events(user_message, history)
     try:
-        assistant_message, history_token, follow_ups = respond_to(user_message, history)
+        # Wait for the topic check and the start of the reply, so a failure before then is a normal error
+        first = next(events)
+        if STREAM_MIMETYPE in request.headers.get("Accept", ""):
+            return stream_reply(user_message, first, events)
+        # Not asked to stream (e.g. a page loaded before streaming existed): send the finished reply
+        kind, result = first
+        while kind != "done":
+            kind, result = next(events)
     except Exception:
         # Log the full error (visible in Heroku logs) and give the user a friendly reply instead of a 500
         app.logger.exception("OpenAI request failed")
         return jsonify({"message": SERVICE_ERROR_REPLY}), 502
 
-    log_exchange(user_message, assistant_message)
-    return jsonify({"message": assistant_message, "history": history_token, "followUps": follow_ups})
+    reply, history_token, follow_ups = result
+    log_exchange(user_message, reply)
+    return jsonify({"message": reply, "history": history_token, "followUps": follow_ups})
 
 
 @app.route("/about")

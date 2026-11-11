@@ -2,6 +2,7 @@
 so tests are fast, free, and never touch real services."""
 
 import os
+import re
 import types
 
 # Must be set before `app` is imported, because app.py reads them at import time
@@ -18,33 +19,61 @@ import pytest  # noqa: E402
 import app as lovelab  # noqa: E402
 
 
+class FakeStream:
+    """Stands in for the SDK's stream of reply events: the reply arrives a word at a time. With
+    fail_midway set, that error is raised after the first word."""
+
+    def __init__(self, text, fail_midway=None):
+        self.text = text
+        self.fail_midway = fail_midway
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.closed = True
+
+    def __iter__(self):
+        for index, piece in enumerate(re.findall(r"\S+\s*|\s+", self.text)):
+            if self.fail_midway and index == 1:
+                raise self.fail_midway
+            yield types.SimpleNamespace(type="response.output_text.delta", delta=piece)
+        done = types.SimpleNamespace(status="completed", incomplete_details=None)
+        yield types.SimpleNamespace(type="response.completed", response=done)
+
+
 class FakeOpenAI:
-    """Stands in for the OpenAI client. Tests set `verdict`, `reply` or `error` to control it,
-    and inspect `filter_calls` / `reply_calls` to see what would have been sent."""
+    """Stands in for the OpenAI client. Tests set `verdict`, `reply`, `error` or `fail_midway` to control
+    it, and inspect `filter_calls` / `reply_calls` / `streams` to see what would have been sent."""
 
     def __init__(self):
         self.verdict = "YES"
         self.reply = "Here's some thoughtful advice."
         self.error = None
+        self.fail_midway = None
         self.filter_calls = []
         self.reply_calls = []
         self.store_flags = []
         self.reply_token_caps = []
+        self.streams = []
         self.responses = self
 
     def with_options(self, **_options):
         return self
 
-    def create(self, model, instructions, input, store=True, max_output_tokens=None):
+    def create(self, model, instructions, input, store=True, max_output_tokens=None, stream=False):
         self.store_flags.append(store)
         if self.error:
             raise self.error
         if instructions == lovelab.FILTER_INSTRUCTIONS:
             self.filter_calls.append(input)
             return types.SimpleNamespace(output_text=self.verdict)
+        assert stream, "Replies are always streamed"
         self.reply_calls.append(input)
         self.reply_token_caps.append(max_output_tokens)
-        return types.SimpleNamespace(output_text=self.reply, status="completed", incomplete_details=None)
+        self.streams.append(FakeStream(self.reply, self.fail_midway))
+        return self.streams[-1]
 
 
 @pytest.fixture

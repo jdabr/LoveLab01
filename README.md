@@ -23,6 +23,7 @@ partner, family, friends or coworkers and get warm, practical guidance, with no 
   every reply.
 - **Focused and safe.** Off-topic requests are gently declined, and messages about danger or
   self-harm are prioritized, with a caring reply and crisis resources.
+- **Replies appear as they're written**, instead of after a wait.
 - **Responsive.** Works on phones and large monitors, in light and dark mode.
 
 ## How a message flows through the app
@@ -39,7 +40,7 @@ flowchart LR
     M --> S[Scrub contact details]
     OT --> S
     S --> DB[(Postgres<br/>anonymized log)]
-    M --> B
+    M -->|streamed as it's written| B
     OT --> B
 ```
 
@@ -54,7 +55,7 @@ flowchart LR
 | Shared devices | Chats are saved in `sessionStorage` (cleared when the tab closes) unless the visitor opts in to remembering, and remembered chats expire 30 days after their last message. The site sets no cookies, so deleting a chat leaves nothing behind on the device or LoveLab's servers except the anonymized log. |
 | Encryption in transit | In production, plain-HTTP requests are redirected to HTTPS (`308` for `POST`, so messages aren't silently dropped), and an `HSTS` header tells browsers to use HTTPS for the site from then on. |
 | Cross-site attacks | A strict Content-Security-Policy (no inline scripts or styles), `X-Frame-Options: DENY`, and no cookies to steal or ride on. All user-supplied text, including people's names, is rendered with `textContent`, never as HTML. |
-| Cost and availability | Per-call timeouts keep both OpenAI calls within Heroku's 30-second limit, automatic retries are off, and each reply has a hard token cap. A moving-window rate limit caps usage per visitor and globally, and only messages that reach OpenAI count toward it, so junk requests can't use up the site-wide limit. Page loads never touch the database. |
+| Cost and availability | Per-call timeouts make a slow OpenAI call fail fast, well within Heroku's 30-second limit for a response to start, and automatic retries are off. Each reply has a hard token cap, and if the visitor leaves partway through a streamed reply, the model stops writing. A moving-window rate limit caps usage per visitor and globally, and only messages that reach OpenAI count toward it, so junk requests can't use up the site-wide limit. Page loads never touch the database. |
 | Crisis situations | Both prompts treat safety as overriding the topic rule: the classifier is instructed to always let these messages through, and the reply model is instructed to share emergency, 988, domestic-violence and international helpline resources, which appear as tappable links. Replies that share them get no follow-up suggestions. |
 
 ## Tech stack

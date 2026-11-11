@@ -7,8 +7,10 @@ rate limits. Templates and Python changes reload automatically.
 """
 
 import os
+import re
 import sys
 import tempfile
+import time
 import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,22 +38,42 @@ SAMPLE_REPLIES = [
 ]
 
 
+class FakeStream:
+    """Streams a sample reply a word at a time, at roughly the pace of the real model."""
+
+    def __init__(self, text):
+        self.text = text
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return None
+
+    def __iter__(self):
+        for piece in re.findall(r"\S+\s*|\s+", self.text):
+            time.sleep(0.04)
+            yield types.SimpleNamespace(type="response.output_text.delta", delta=piece)
+        done = types.SimpleNamespace(status="completed", incomplete_details=None)
+        yield types.SimpleNamespace(type="response.completed", response=done)
+
+
 class FakeOpenAI:
-    """Says every message is on topic and answers with the sample replies in turn."""
+    """Says every message is on topic, and streams the sample replies in turn within each chat (the first
+    message in a chat always gets the first one)."""
 
     def __init__(self):
         self.responses = self
-        self.count = 0
 
     def with_options(self, **_options):
         return self
 
     def create(self, model, instructions, input, **_options):
         if instructions == lovelab.FILTER_INSTRUCTIONS:
+            time.sleep(0.6)  # Like the real topic check, so the typing dots show briefly
             return types.SimpleNamespace(output_text="YES")
-        reply = SAMPLE_REPLIES[self.count % len(SAMPLE_REPLIES)]
-        self.count += 1
-        return types.SimpleNamespace(output_text=reply)
+        user_messages = sum(1 for message in input if message["role"] == "user")
+        return FakeStream(SAMPLE_REPLIES[(user_messages - 1) % len(SAMPLE_REPLIES)])
 
 
 lovelab.chat_assistant.client = FakeOpenAI()

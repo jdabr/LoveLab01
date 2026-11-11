@@ -300,28 +300,62 @@ class TermsManager {
 
 // ── Server ──
 
-// Sends a message to the server. history is the chat's signed history token (or null for a new chat).
-// Resolves to { message, history, followUps }: the reply, the chat's updated history token, and whether
-// to suggest follow-ups under the reply. Rejects on errors; when the server explains the problem (e.g.
-// too many messages), error.userMessage holds its explanation.
-function requestReply(message, history) {
-    return fetch('/', {
+// Sends a message to the server, asking for the reply to be streamed: onText(textSoFar) is called as it's
+// written. history is the chat's signed history token (or null for a new chat). Resolves to
+// { message, history, followUps }: the finished reply, the chat's updated history token, and whether to
+// suggest follow-ups under it. Rejects on errors; when the server explains the problem (e.g. too many
+// messages), error.userMessage holds its explanation.
+async function requestReply(message, history, onText) {
+    const response = await fetch('/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
         body: JSON.stringify({ message, history }),
-    }).then(response => response.json()
-        .catch(() => null)  // Non-JSON responses (e.g. an HTML error page)
-        .then(data => {
-            if (!data || typeof data.message !== 'string' || !data.message.trim()) {
-                throw new Error(`Server error (${response.status})`);
+    });
+    if (response.ok && response.headers.get('Content-Type')?.startsWith('application/x-ndjson')) {
+        return readReplyStream(response, onText);
+    }
+    const data = await response.json().catch(() => null);  // Non-JSON responses (e.g. an HTML error page)
+    return finishedReply(data, response);
+}
+
+// Reads a streamed reply: one JSON object per line, {"text"} pieces as it's written, then the finished
+// reply, or {"error"} if it failed partway
+async function readReplyStream(response, onText) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let text = '';
+    for (;;) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split('\n');
+        buffer = done ? '' : lines.pop();  // A line split across chunks is finished by the next one
+        for (const line of lines.filter(line => line.trim())) {
+            const event = JSON.parse(line);
+            if (typeof event.text === 'string') {
+                text += event.text;
+                onText?.(text);
+            } else if (typeof event.error === 'string') {
+                throw Object.assign(new Error(event.error), { userMessage: event.error });
+            } else {
+                return finishedReply(event, response);
             }
-            if (!response.ok) throw Object.assign(new Error(data.message), { userMessage: data.message });
-            return {
-                message: data.message,
-                history: typeof data.history === 'string' ? data.history : null,
-                followUps: data.followUps === true,
-            };
-        }));
+        }
+        if (done) throw new Error('The reply was cut off');
+    }
+}
+
+// Checks the server's finished reply (or error) and returns { message, history, followUps }
+function finishedReply(data, response) {
+    if (!data || typeof data.message !== 'string' || !data.message.trim()) {
+        throw new Error(`Server error (${response.status})`);
+    }
+    if (!response.ok) throw Object.assign(new Error(data.message), { userMessage: data.message });
+    return {
+        message: data.message,
+        history: typeof data.history === 'string' ? data.history : null,
+        followUps: data.followUps === true,
+    };
 }
 
 // ── Saved chats ──
@@ -680,6 +714,21 @@ function scrollToMessage(container, element) {
     container.scrollTop += top - margin;
 }
 
+// While a reply is being written, a ** may not have its partner yet; close it so the words show in bold
+// rather than with stray asterisks
+function closeOpenBold(text) {
+    return (text.match(/\*\*/g) ?? []).length % 2 ? `${text}**` : text;
+}
+
+// A blinking caret at the end of a reply that's still being written
+function appendCaret(bubble) {
+    let end = bubble.lastElementChild ?? bubble;
+    if (end.tagName === 'UL' || end.tagName === 'OL') end = end.lastElementChild ?? end;
+    const caret = createElement('span', 'caret');
+    caret.setAttribute('aria-hidden', 'true');
+    end.append(caret);
+}
+
 // Represents a single chat message and renders it in the chat container. Errors (isError) are shown
 // like replies but never saved.
 class Message {
@@ -884,17 +933,17 @@ class ChatApp {
         this.fetchReply(chatId, userMessage);
     }
 
-    // Asks the server to reply to the chat's latest message
+    // Asks the server to reply to the chat's latest message, showing the reply as it's written
     fetchReply(chatId, userMessage) {
         this.setPending(chatId);
         this.renderSidebar();
-        requestReply(userMessage, this.library.getChat(chatId).history)
+        this.followingReply = true;
+        requestReply(userMessage, this.library.getChat(chatId).history, text => this.showPartialReply(chatId, text))
             .then(({ message, history, followUps }) => {
                 this.library.addMessage(chatId, 'assistant', message, followUps ? { followUps } : {});
                 this.library.setHistory(chatId, history);
                 if (this.current.chatId === chatId) {
-                    this.hideThinking();
-                    this.addMessage('assistant', message);
+                    this.finishPartialReply(message);
                     this.announce(message);
                 }
             })
@@ -902,6 +951,7 @@ class ChatApp {
                 // Always clear the typing indicator so the chat never gets stuck. Errors are shown but
                 // not saved, so they don't reappear later or replace the chat's history.
                 console.error('Error:', error);
+                this.endPartialReply()?.remove();  // A reply that failed partway is discarded
                 if (this.current.chatId === chatId) {
                     const message = error.userMessage
                         || 'Sorry, something went wrong on our end. Please try again in a moment.';
@@ -916,6 +966,52 @@ class ChatApp {
                 this.renderSidebar();
                 this.focusInput();
             });
+    }
+
+    // ── Replies as they're written ──
+
+    // Shows the reply so far in place of the typing dots, redrawing at most once per frame. Only while its
+    // chat is open; switching back mid-reply picks up where it's got to.
+    showPartialReply(chatId, text) {
+        const partial = this.partial ??= { bubble: null, frame: 0 };
+        partial.text = text;
+        if (partial.frame || this.current.chatId !== chatId) return;
+        partial.frame = requestAnimationFrame(() => {
+            partial.frame = 0;
+            if (this.partial !== partial || this.current.chatId !== chatId) return;
+            if (!partial.bubble?.isConnected) {  // The first piece, or the chat was redrawn
+                this.hideThinking();
+                partial.bubble = createElement('div', 'message assistant-message streaming');
+                this.messageContainer.append(partial.bubble);
+            }
+            partial.bubble.replaceChildren();
+            renderRichText(partial.bubble, closeOpenBold(partial.text));
+            appendCaret(partial.bubble);
+            if (this.followingReply) scrollToMessage(this.messageContainer, partial.bubble);
+        });
+    }
+
+    // The reply is finished: its bubble becomes a normal reply (or, if it wasn't showing, one is added)
+    finishPartialReply(message) {
+        const bubble = this.endPartialReply();
+        this.hideThinking();
+        if (!bubble?.isConnected) {
+            this.addMessage('assistant', message);
+            return;
+        }
+        bubble.classList.remove('streaming');
+        bubble.replaceChildren();
+        renderRichText(bubble, message);
+        bubble.after(this.createReplyActions(message));
+        if (this.followingReply) scrollToMessage(this.messageContainer, bubble);
+    }
+
+    // Stops drawing the reply in progress, and returns its bubble (if one was shown)
+    endPartialReply() {
+        const partial = this.partial;
+        this.partial = null;
+        if (partial?.frame) cancelAnimationFrame(partial.frame);
+        return partial?.bubble ?? null;
     }
 
     // Asks again for a reply to the chat's last message, after the first attempt failed
@@ -1107,7 +1203,8 @@ class ChatApp {
 
     // How many of the chat's saved messages are on screen (errors and the typing indicator aren't saved)
     shownMessageCount() {
-        return this.messageContainer.querySelectorAll('.message:not(.thinking-message):not(.error-message)').length;
+        const notSaved = ':not(.thinking-message):not(.error-message):not(.streaming)';
+        return this.messageContainer.querySelectorAll(`.message${notSaved}`).length;
     }
 
     // Opens a chat after choosing who it's about
@@ -1320,6 +1417,10 @@ class ChatApp {
         this.addPersonButton.addEventListener('click', () => this.addPerson());
         this.chatList.addEventListener('click', (e) => this.handleChatListClick(e));
         this.suggestions.addEventListener('click', (e) => this.useSuggestion(e));
+        // Once the visitor scrolls while a reply is being written, stop scrolling it for them
+        for (const type of ['wheel', 'touchmove']) {
+            this.messageContainer.addEventListener(type, () => { this.followingReply = false; }, { passive: true });
+        }
         window.addEventListener('storage', (e) => this.handleStorageEvent(e));
         this.rememberSwitch.addEventListener('change', () => {
             this.library.setRemembered(this.rememberSwitch.checked);

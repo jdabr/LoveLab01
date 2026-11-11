@@ -81,6 +81,8 @@ def have_conversation(page):
             "n => document.querySelectorAll('.assistant-message:not(.thinking-message)').length > n",
             arg=replies, timeout=10000,
         )
+        # Replies stream in: wait until this one has finished before sending the next message
+        page.wait_for_function("() => !document.querySelector('#chat-form [type=submit]').disabled", timeout=20000)
 
 
 def reload_visible(pages):

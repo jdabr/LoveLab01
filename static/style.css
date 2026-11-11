@@ -375,6 +375,22 @@ body {
 /* Errors (e.g. "please try again") are shown but never saved with the chat */
 .assistant-message.error-message { border-color: var(--danger); }
 
+/* A blinking caret at the end of a reply that's still being written */
+.caret {
+    display: inline-block;
+    width: 0.45em;
+    height: 1em;
+    margin-left: 0.15em;
+    vertical-align: -0.12em;
+    border-radius: 1px;
+    background-color: var(--text-secondary);
+    animation: caret-blink 1s steps(1) infinite;
+}
+
+@keyframes caret-blink {
+    50% { opacity: 0; }
+}
+
 /* Crisis resources in replies are tappable links */
 .assistant-message a {
     color: var(--accent);
