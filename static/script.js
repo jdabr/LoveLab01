@@ -942,10 +942,14 @@ class ChatApp {
             tail.append(createElement('span', 'retry-note', 'LoveLab couldn\'t reply to this.'),
                 createButton('text-button', 'Try again', () => this.retry()));
         } else if (last.followUps) {
+            // Never suggest something the visitor has already asked in this chat (clicked or typed)
+            const asked = new Set(chat.messages.filter(m => m.role === 'user').map(m => m.content.trim().toLowerCase()));
+            const fresh = FOLLOW_UPS.filter(question => !asked.has(question.toLowerCase()));
+            if (!fresh.length) return;
             tail = createElement('div', 'chat-tail');
             tail.setAttribute('role', 'group');
             tail.setAttribute('aria-label', 'Suggested follow-ups');
-            FOLLOW_UPS.forEach(text => tail.append(createButton('follow-up', text, () => this.send(text))));
+            fresh.forEach(text => tail.append(createButton('follow-up', text, () => this.send(text))));
         } else {
             return;
         }
