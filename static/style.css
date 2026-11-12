@@ -216,14 +216,19 @@ body {
     font-weight: 500;
 }
 
-/* The per-chat delete button appears on hover (always shown on touch screens) */
-.chat-delete { opacity: 0; }
-.chat-item:hover .chat-delete,
-.chat-item:focus-within .chat-delete,
-.chat-item.active .chat-delete { opacity: 1; }
+/* Each chat's rename and delete buttons appear on hover (always shown on touch screens) */
+.chat-action { opacity: 0; }
+.chat-item:hover .chat-action,
+.chat-item:focus-within .chat-action,
+.chat-item.active .chat-action { opacity: 1; }
 
 @media (hover: none) {
-    .chat-delete { opacity: 1; }
+    .chat-action { opacity: 1; }
+}
+
+.chat-action svg {
+    width: 14px;
+    height: 14px;
 }
 
 .icon-button {
@@ -908,13 +913,14 @@ body {
     color: var(--text-secondary);
 }
 
-.person-form {
+/* The forms in dialogs (a person's details, a chat's name) */
+.modal-form {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
 }
 
-.person-form .modal-button { align-self: flex-end; }
+.modal-form .modal-button { align-self: flex-end; }
 
 .field {
     display: flex;

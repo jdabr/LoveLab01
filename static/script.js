@@ -539,6 +539,15 @@ class ChatLibrary {
         this.persist();
     }
 
+    // A name the visitor chose. Renaming isn't activity: the chat keeps its place in the list and still
+    // expires rememberDays after its last message.
+    renameChat(id, title) {
+        const chat = this.getChat(id);
+        if (!chat) return;
+        chat.title = title;
+        this.persist();
+    }
+
     setHistory(chatId, history) {
         const chat = this.getChat(chatId);
         if (!chat) return;
@@ -632,6 +641,7 @@ const ICONS = {
         ['path', { d: 'M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2' }]],
     check: [['path', { d: 'M20 6 9 17l-5-5' }]],
     cross: [['path', { d: 'M18 6 6 18M6 6l12 12' }]],
+    pencil: [['path', { d: 'M4 20l1-4L16 5l3 3L8 19zM14 7l3 3' }]],
 };
 
 function createIcon(name) {
@@ -846,28 +856,31 @@ function personLabel(person) {
     return person.relationship ? `${person.name} · ${person.relationship}` : person.name;
 }
 
+// A labelled text box that can't be left empty, for the forms in dialogs
+function createTextField(label, { value = '', maxLength, placeholder = '' }) {
+    const field = createElement('label', 'field');
+    const input = createElement('input');
+    Object.assign(input, { type: 'text', value, maxLength, placeholder, required: true, autocomplete: 'off' });
+    field.append(createElement('span', 'field-label', label), input);
+    return { field, input };
+}
+
 // The name + relationship form used to add or edit a person. onSubmit({ name, relationship }).
 function createPersonForm({ person = null, submitLabel, onSubmit }) {
-    const form = createElement('form', 'person-form');
+    const form = createElement('form', 'modal-form');
+    const { field: nameField, input: nameInput } = createTextField('Name or nickname',
+        { value: person?.name ?? '', maxLength: MAX_NAME_LENGTH, placeholder: 'e.g. Sarah, Mom, my boss' });
 
-    const nameLabel = createElement('label', 'field');
-    nameLabel.append(createElement('span', 'field-label', 'Name or nickname'));
-    const nameInput = createElement('input');
-    Object.assign(nameInput, { type: 'text', maxLength: MAX_NAME_LENGTH, required: true, autocomplete: 'off' });
-    nameInput.placeholder = 'e.g. Sarah, Mom, my boss';
-    nameInput.value = person?.name ?? '';
-    nameLabel.append(nameInput);
-
-    const relationshipLabel = createElement('label', 'field');
-    relationshipLabel.append(createElement('span', 'field-label', 'Relationship'));
+    const relationshipField = createElement('label', 'field');
+    relationshipField.append(createElement('span', 'field-label', 'Relationship'));
     const select = createElement('select');
     RELATIONSHIPS.forEach(r => select.append(new Option(r, r, false, r === (person?.relationship ?? 'Partner'))));
-    relationshipLabel.append(select);
+    relationshipField.append(select);
 
     const submit = createElement('button', 'modal-button primary', submitLabel);
     submit.type = 'submit';
 
-    form.append(nameLabel, relationshipLabel, submit);
+    form.append(nameField, relationshipField, submit);
     form.addEventListener('submit', (e) => {
         e.preventDefault();
         const name = nameInput.value.replace(/\s+/g, ' ').trim();
@@ -1324,6 +1337,28 @@ class ChatApp {
         else this.renderSidebar();
     }
 
+    // Chats are named after their first message until the visitor gives them a name of their own
+    renameChat(chatId) {
+        const chat = this.library.getChat(chatId);
+        if (!chat) return;
+        const form = createElement('form', 'modal-form');
+        const { field, input } = createTextField('Chat name', { value: chat.title, maxLength: ChatLibrary.TITLE_LENGTH });
+        const save = createElement('button', 'modal-button primary', 'Save');
+        save.type = 'submit';
+        form.append(field, save);
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const title = ChatLibrary.titleFrom(input.value);
+            if (!title) { input.focus(); return; }
+            this.library.renameChat(chatId, title);
+            dialog.close();
+            this.renderSidebar();
+        });
+        const dialog = Modal.open({ title: 'Rename chat', content: form, className: 'modal-narrow' });
+        input.focus();
+        input.select();
+    }
+
     // ── Rendering ──
 
     updateHeader() {
@@ -1377,11 +1412,16 @@ class ChatApp {
                 open.dataset.action = 'open-chat';
                 open.dataset.chatId = chat.id;
                 if (chat.id === this.current.chatId) open.setAttribute('aria-current', 'true');
-                const remove = createButton('icon-button chat-delete', '×');
+                const rename = createButton('icon-button chat-action');
+                rename.append(createIcon('pencil'));
+                Object.assign(rename.dataset, { action: 'rename-chat', chatId: chat.id });
+                rename.setAttribute('aria-label', `Rename chat "${chat.title}"`);
+                rename.title = 'Rename chat';
+                const remove = createButton('icon-button chat-action', '×');
                 Object.assign(remove.dataset, { action: 'delete-chat', chatId: chat.id });
                 remove.setAttribute('aria-label', `Delete chat "${chat.title}"`);
                 remove.title = 'Delete chat';
-                item.append(open, remove);
+                item.append(open, rename, remove);
                 list.append(item);
             });
             group.append(list);
@@ -1397,6 +1437,7 @@ class ChatApp {
         if (action === 'open-chat') this.openChat(chatId);
         else if (action === 'new-chat') this.openChat(null, personId || null);
         else if (action === 'edit-person') this.editPerson(personId);
+        else if (action === 'rename-chat') this.renameChat(chatId);
         else if (action === 'delete-chat') this.deleteChat(chatId);
     }
 
@@ -1405,9 +1446,10 @@ class ChatApp {
         this.rememberNote.hidden = !remember;
     }
 
-    // Focus the message box on desktop only; on phones it would pop the keyboard open
+    // Focus the message box on desktop only (on phones it would pop the keyboard open), and never from
+    // behind an open dialog, e.g. when a reply finishes while the visitor is renaming a chat
     focusInput() {
-        if (window.matchMedia('(pointer: fine)').matches) this.input.focus();
+        if (!Modal.current && window.matchMedia('(pointer: fine)').matches) this.input.focus();
     }
 
     init() {
