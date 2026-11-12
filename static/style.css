@@ -1235,31 +1235,24 @@ p {
     padding: 14px 18px;
 }
 
-.dot {
+/* The typing dots stay in a line and fade in and out together */
+.thinking-message .dot {
     width: 8px;
     height: 8px;
+    margin: 0;  /* Not the space between a reply's paragraphs, which would push the second and third dots down */
     border-radius: 50%;
     background-color: var(--text-secondary);
-    animation: thinking 1.2s infinite ease-in-out;
+    animation: thinking 1.4s ease-in-out infinite;
 }
-
-.dot:nth-child(1) { animation-delay: 0s; }
-.dot:nth-child(2) { animation-delay: 0.2s; }
-.dot:nth-child(3) { animation-delay: 0.4s; }
 
 @keyframes thinking {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-    30% { transform: translateY(-6px); opacity: 1; }
-}
-
-/* With "reduce motion" on, the dots fade together instead of bouncing, so it's still clear a reply is coming */
-@media (prefers-reduced-motion: reduce) {
-    .dot { animation: thinking-fade 1.6s ease-in-out infinite !important; }
-}
-
-@keyframes thinking-fade {
-    0%, 100% { opacity: 0.4; }
+    0%, 100% { opacity: 0.35; }
     50% { opacity: 1; }
+}
+
+/* Fading isn't movement, so the dots keep going with "reduce motion" on (which stops every other animation) */
+@media (prefers-reduced-motion: reduce) {
+    .thinking-message .dot { animation: thinking 1.4s ease-in-out infinite !important; }
 }
 
 /* ── Responsive / Mobile ── */

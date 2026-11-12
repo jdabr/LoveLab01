@@ -755,7 +755,7 @@ class Message {
     }
 }
 
-// Extends Message to display an animated bouncing dots indicator instead of text
+// Extends Message to show typing dots instead of text
 class ThinkingMessage extends Message {
     constructor() {
         super('assistant', '');
